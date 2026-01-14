@@ -1,0 +1,55 @@
+# Gmail Attachment Stripper Configuration
+# Copy this file to config.yaml and update with your settings
+
+gmail:
+  # Your Gmail address
+  email: "your-email@gmail.com"
+
+oauth:
+  # Path to OAuth credentials JSON downloaded from Google Cloud Console
+  credentials_file: "credentials.json"
+  # Path to store encrypted OAuth token (will be created automatically)
+  token_file: "token.enc"
+  # OAuth scopes required for IMAP access
+  scopes:
+    - "https://mail.google.com/"
+
+backup:
+  # Root directory for attachment backups
+  directory: "./backups"
+  # Organization strategy: "date", "sender", or "label"
+  organize_by: "date"
+
+processing:
+  # If true, show what would happen without making changes (recommended for first run)
+  dry_run: true
+  # Number of emails to process per batch
+  batch_size: 50
+  # Skip S/MIME and PGP encrypted emails (cannot safely modify)
+  skip_encrypted: true
+  # Keep inline images (Content-Disposition: inline) - usually needed for HTML emails
+  preserve_inline_images: true
+  # Minimum attachment size to process (in bytes) - skip tiny attachments
+  # 102400 = 100KB, 1048576 = 1MB, 5242880 = 5MB
+  min_attachment_size: 102400
+
+safety:
+  # Keep original emails in Trash for this many days before permanent deletion
+  keep_trash_days: 30
+  # Require confirmation before each batch
+  require_confirmation: true
+  # Path to transaction log for recovery
+  transaction_log: "./logs/transactions.jsonl"
+
+# Search defaults (can be overridden via CLI)
+search:
+  # Only process emails older than this date (YYYY-MM-DD format)
+  # before_date: "2020-01-01"
+  # Only process emails newer than this date
+  # after_date: null
+  # Only process emails from specific senders (comma-separated)
+  # from_senders: null
+  # Only process emails with specific labels (comma-separated)
+  # labels: null
+  # Exclude emails with specific labels
+  # exclude_labels: "IMPORTANT,STARRED"
