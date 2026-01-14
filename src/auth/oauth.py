@@ -204,7 +204,7 @@ class GmailOAuth:
 
         return self._credentials
 
-    def generate_xoauth2_string(self, email: str) -> str:
+    def generate_xoauth2_string(self, email: str) -> bytes:
         """Generate SASL XOAUTH2 authentication string for IMAP.
 
         This format is required by Gmail's IMAP server for OAuth2 authentication.
@@ -214,7 +214,7 @@ class GmailOAuth:
             email: Gmail address to authenticate.
 
         Returns:
-            Base64-encoded XOAUTH2 authentication string.
+            Raw XOAUTH2 authentication bytes (imaplib will base64-encode).
 
         Raises:
             AuthenticationError: If no valid credentials available.
@@ -226,7 +226,7 @@ class GmailOAuth:
 
         # XOAUTH2 format: user={email}\x01auth=Bearer {token}\x01\x01
         auth_string = f"user={email}\x01auth=Bearer {creds.token}\x01\x01"
-        return base64.b64encode(auth_string.encode()).decode()
+        return auth_string.encode()
 
     def revoke(self) -> bool:
         """Revoke stored credentials and delete token file.

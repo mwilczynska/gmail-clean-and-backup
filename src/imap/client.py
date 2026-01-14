@@ -79,14 +79,14 @@ class GmailIMAPClient:
             raise IMAPConnectionError("Not connected. Call connect() first.")
 
         try:
-            # Generate XOAUTH2 string
-            auth_string = self.oauth_handler.generate_xoauth2_string(self.email_address)
+            # Generate XOAUTH2 bytes (imaplib will base64-encode)
+            auth_bytes = self.oauth_handler.generate_xoauth2_string(self.email_address)
 
             # Authenticate using XOAUTH2
-            # The lambda is required by imaplib.authenticate()
+            # imaplib.authenticate expects a callable that returns bytes
             self._connection.authenticate(
                 "XOAUTH2",
-                lambda _: auth_string.encode(),
+                lambda _: auth_bytes,
             )
         except imaplib.IMAP4.error as e:
             raise IMAPAuthenticationError(f"IMAP authentication failed: {e}") from e
@@ -124,7 +124,9 @@ class GmailIMAPClient:
         self._ensure_connected()
 
         try:
-            status, data = self._connection.select(folder, readonly=readonly)  # type: ignore
+            # Quote folder name for IMAP - required for names with special chars
+            quoted_folder = f'"{folder}"'
+            status, data = self._connection.select(quoted_folder, readonly=readonly)  # type: ignore
             if status != "OK":
                 raise IMAPConnectionError(f"Failed to select folder {folder}: {data}")
 
@@ -323,8 +325,10 @@ class GmailIMAPClient:
 
         try:
             flag_str = " ".join(flags) if flags else None
+            # Quote folder name for IMAP
+            quoted_folder = f'"{folder}"'
             status, data = self._connection.append(  # type: ignore
-                folder,
+                quoted_folder,
                 flag_str,
                 date_time,
                 email_data,
@@ -388,7 +392,9 @@ class GmailIMAPClient:
         self._ensure_folder_selected()
 
         try:
-            status, _ = self._connection.uid("COPY", str(uid), folder)  # type: ignore
+            # Quote folder name for IMAP
+            quoted_folder = f'"{folder}"'
+            status, _ = self._connection.uid("COPY", str(uid), quoted_folder)  # type: ignore
             return status == "OK"
         except Exception:
             return False
@@ -463,6 +469,8 @@ class GmailIMAPClient:
             Dictionary mapping part names to values.
         """
         result: dict[str, Any] = {}
+        # Collect all header strings for combined parsing
+        all_headers = []
 
         for item in data:
             if item is None:
@@ -472,13 +480,19 @@ class GmailIMAPClient:
                 # Tuple: (header_info, body_content)
                 header = item[0].decode() if isinstance(item[0], bytes) else str(item[0])
                 body = item[1] if len(item) > 1 else None
+                all_headers.append(header)
 
                 # Parse header info
                 self._parse_fetch_header(header, body, result)
 
             elif isinstance(item, bytes):
-                # Closing paren or other marker - ignore
-                pass
+                # This could contain BODYSTRUCTURE or closing data
+                item_str = item.decode("utf-8", errors="replace")
+                all_headers.append(item_str)
+
+        # Parse combined headers for things that might span items
+        combined = " ".join(all_headers)
+        self._parse_combined_headers(combined, result)
 
         return result
 
@@ -518,16 +532,50 @@ class GmailIMAPClient:
 
         # Extract RFC822 or BODY parts
         if body is not None:
-            if "RFC822" in header:
-                result["RFC822"] = body
-            elif "BODY[HEADER]" in header:
+            # Check for specific BODY parts first (more specific match before RFC822)
+            if "BODY[HEADER]" in header:
                 result["BODY[HEADER]"] = body
-            else:
+            elif "BODY[" in header:
                 # Try to match BODY[x] patterns
                 match = re.search(r"BODY\[([^\]]*)\]", header)
                 if match:
                     key = f"BODY[{match.group(1)}]"
                     result[key] = body
+            elif "RFC822}" in header or header.strip().endswith("RFC822"):
+                # Only match RFC822 if it's a literal fetch, not RFC822.SIZE
+                result["RFC822"] = body
+
+    def _parse_combined_headers(self, combined: str, result: dict[str, Any]) -> None:
+        """Parse combined header string for values that span multiple items.
+
+        Args:
+            combined: Combined header strings from all FETCH response items.
+            result: Dictionary to populate with parsed values.
+        """
+        # Extract BODYSTRUCTURE - it's a nested parentheses structure
+        if "BODYSTRUCTURE" not in result:
+            match = re.search(r"BODYSTRUCTURE\s+(\(.*)", combined)
+            if match:
+                # Find matching closing paren for the BODYSTRUCTURE
+                bs_str = match.group(1)
+                depth = 0
+                end_idx = 0
+                for i, char in enumerate(bs_str):
+                    if char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > 0:
+                    result["BODYSTRUCTURE"] = bs_str[:end_idx]
+
+        # Extract RFC822.SIZE
+        if "RFC822.SIZE" not in result:
+            match = re.search(r"RFC822\.SIZE\s+(\d+)", combined)
+            if match:
+                result["RFC822.SIZE"] = int(match.group(1))
 
     def __enter__(self) -> "GmailIMAPClient":
         """Context manager entry - connect and authenticate."""
