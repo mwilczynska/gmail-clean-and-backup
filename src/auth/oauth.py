@@ -90,12 +90,14 @@ class GmailOAuth:
         Returns:
             Credentials object or None if not found/invalid.
         """
+        from datetime import datetime
+
         token_data = self.token_storage.load()
         if not token_data:
             return None
 
         try:
-            return Credentials(
+            creds = Credentials(
                 token=token_data.get("token"),
                 refresh_token=token_data.get("refresh_token"),
                 token_uri=token_data.get("token_uri"),
@@ -103,6 +105,22 @@ class GmailOAuth:
                 client_secret=token_data.get("client_secret"),
                 scopes=token_data.get("scopes"),
             )
+
+            # Restore expiry time if saved
+            expiry_str = token_data.get("expiry")
+            if expiry_str:
+                expiry = datetime.fromisoformat(expiry_str)
+                # Google's library uses naive datetimes (UTC assumed)
+                # Remove timezone info if present
+                if expiry.tzinfo is not None:
+                    expiry = expiry.replace(tzinfo=None)
+                creds.expiry = expiry
+            else:
+                # No expiry saved - assume token is expired to force refresh
+                # Use naive datetime to match Google's library
+                creds.expiry = datetime.utcnow()
+
+            return creds
         except Exception:
             return None
 
@@ -119,6 +137,7 @@ class GmailOAuth:
             "client_id": creds.client_id,
             "client_secret": creds.client_secret,
             "scopes": list(creds.scopes) if creds.scopes else self.scopes,
+            "expiry": creds.expiry.isoformat() if creds.expiry else None,
         }
         self.token_storage.save(token_data)
 
