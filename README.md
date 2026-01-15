@@ -12,6 +12,7 @@ A Python CLI tool that safely removes attachments from Gmail emails while preser
 - **Two-Phase Replace** - Upload verified replacement before deleting original
 - **Transaction Logging** - Recovery from interruptions with JSONL transaction logs
 - **Dry Run Mode** - Preview changes before making modifications
+- **Revert Capability** - Restore original emails from Trash within 30 days if needed
 
 ## Installation
 
@@ -149,6 +150,36 @@ gmail-clean process --email your-email@gmail.com --min-size 1MB --no-dry-run --z
 gmail-clean status
 ```
 
+### Revert Processed Emails
+
+If you need to restore original emails (with attachments) after processing, you can revert them while the originals are still in Gmail Trash (typically 30 days).
+
+```bash
+# List emails that can be reverted
+gmail-clean revert --email your-email@gmail.com --list
+
+# Preview what would be reverted (dry run)
+gmail-clean revert --email your-email@gmail.com
+
+# Revert all revertible emails
+gmail-clean revert --email your-email@gmail.com --no-dry-run
+
+# Revert a specific email by its ID
+gmail-clean revert --email your-email@gmail.com --id 1234567890 --no-dry-run
+```
+
+**How revert works:**
+1. Finds the original email in Gmail Trash using the Message-ID
+2. Copies the original back to All Mail
+3. Restores the original labels
+4. Deletes the stripped version
+5. Updates the manifest status to "reverted"
+
+**Important notes:**
+- Revert only works while originals are in Trash (default 30 days)
+- Once Gmail permanently deletes from Trash, revert is not possible
+- Attachments remain in your local backup even after revert
+
 ### Export Manifest
 
 ```bash
@@ -253,6 +284,7 @@ A manifest file (`manifest.json`) tracks all processed emails and their backup l
 - **Dry Run by Default** - Always preview before making changes
 - **Two-Phase Replace** - New email uploaded and verified before original is deleted
 - **Trash Retention** - Originals moved to Trash, not permanently deleted
+- **Revert Command** - Restore originals from Trash within 30 days if needed
 - **Transaction Logging** - Operations logged for recovery from interruptions
 - **Encrypted Emails Skipped** - S/MIME and PGP emails are detected and skipped
 - **Inline Images Preserved** - Only strips actual attachments, not embedded images

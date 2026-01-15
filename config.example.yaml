@@ -17,8 +17,15 @@ oauth:
 backup:
   # Root directory for attachment backups
   directory: "./backups"
-  # Organization strategy: "date", "sender", or "label"
-  organize_by: "date"
+  # Organization strategy:
+  #   "type"   - Flat folders by file type with date-prefixed filenames (default)
+  #              Creates: backups/images/2005-04-09_photo.jpg
+  #                       backups/documents/2008-01-15_report.pdf
+  #              Easy to browse all photos in one folder, sorted by date
+  #   "date"   - Nested year/month/day/subject folders (legacy)
+  #   "sender" - Organized by sender domain/email
+  #   "label"  - Organized by Gmail label
+  organize_by: "type"
 
 processing:
   # If true, show what would happen without making changes (recommended for first run)

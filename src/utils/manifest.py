@@ -125,6 +125,9 @@ class ManifestManager:
         status: str,
         stripped_size: int | None = None,
         error_message: str | None = None,
+        stripped_uid: int | None = None,
+        original_message_id: str | None = None,
+        gmail_thread_id: str | None = None,
     ) -> bool:
         """Update processing status for an entry.
 
@@ -133,6 +136,9 @@ class ManifestManager:
             status: New status.
             stripped_size: Size after stripping (optional).
             error_message: Error message if failed (optional).
+            stripped_uid: UID of stripped replacement email (optional).
+            original_message_id: Message-ID header for revert (optional).
+            gmail_thread_id: Thread ID for verification (optional).
 
         Returns:
             True if entry was updated.
@@ -144,6 +150,45 @@ class ManifestManager:
             updates["stripped_size"] = stripped_size
         if error_message is not None:
             updates["error_message"] = error_message
+        if stripped_uid is not None:
+            updates["stripped_uid"] = stripped_uid
+        if original_message_id is not None:
+            updates["original_message_id"] = original_message_id
+        if gmail_thread_id is not None:
+            updates["gmail_thread_id"] = gmail_thread_id
+
+        result = self._emails.update(updates, Email.email_id == email_id)
+        return len(result) > 0
+
+    def get_revertible_entries(self) -> list[ManifestEntry]:
+        """Get entries that can be reverted (completed with tracking info).
+
+        Returns:
+            List of ManifestEntry objects that can be reverted.
+        """
+        Email = Query()
+        results = self._emails.search(
+            (Email.status == "completed") & (Email.original_message_id.exists())
+        )
+        return [ManifestEntry.from_dict(r) for r in results]
+
+    def mark_reverted(self, email_id: str, new_uid: int | None = None) -> bool:
+        """Mark an entry as reverted.
+
+        Args:
+            email_id: Gmail message ID.
+            new_uid: UID of the restored original email (optional).
+
+        Returns:
+            True if entry was updated.
+        """
+        Email = Query()
+        updates: dict[str, Any] = {
+            "status": "reverted",
+            "reverted_at": datetime.now().isoformat(),
+        }
+        if new_uid is not None:
+            updates["reverted_uid"] = new_uid
 
         result = self._emails.update(updates, Email.email_id == email_id)
         return len(result) > 0

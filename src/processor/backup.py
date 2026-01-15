@@ -1,13 +1,50 @@
 """Backup management for extracted attachments."""
 
 import re
+import shutil
 import unicodedata
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.models.email import EmailHeader, SavedAttachment
 from src.utils.hashing import compute_sha256
+
+
+# File type categories for organization
+FILE_TYPE_CATEGORIES: dict[str, set[str]] = {
+    "images": {
+        "jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif",
+        "tiff", "tif", "ico", "svg", "raw", "cr2", "nef", "psd",
+    },
+    "documents": {
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "txt", "rtf", "odt", "ods", "odp", "csv", "md", "html", "htm",
+    },
+    "audio": {
+        "mp3", "wav", "m4a", "flac", "ogg", "aac", "wma", "aiff", "mid", "midi",
+    },
+    "video": {
+        "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
+    },
+}
+
+
+def get_file_category(filename: str) -> str:
+    """Determine file category based on extension.
+
+    Args:
+        filename: Filename to categorize.
+
+    Returns:
+        Category name: images, documents, audio, video, or other.
+    """
+    ext = Path(filename).suffix.lower().lstrip(".")
+    for category, extensions in FILE_TYPE_CATEGORIES.items():
+        if ext in extensions:
+            return category
+    return "other"
 
 
 class BackupManager:
@@ -27,13 +64,17 @@ class BackupManager:
     def __init__(
         self,
         backup_root: Path,
-        organize_by: str = "date",
+        organize_by: str = "type",
     ) -> None:
         """Initialize backup manager.
 
         Args:
             backup_root: Root directory for backups.
-            organize_by: Organization strategy ("date", "sender", "label").
+            organize_by: Organization strategy ("type", "date", "sender", "label").
+                - type: Flat folders by file type with date-prefixed filenames (default)
+                - date: Nested year/month/day/subject folders
+                - sender: Organized by sender domain/email
+                - label: Organized by Gmail label
         """
         self.backup_root = Path(backup_root)
         self.organize_by = organize_by.lower()
@@ -55,7 +96,11 @@ class BackupManager:
         Returns:
             Full path where attachment should be saved.
         """
-        # Get organization prefix
+        # Handle type-based organization (flat folders by file type)
+        if self.organize_by == "type":
+            return self._get_type_organized_path(email_header, filename)
+
+        # Get organization prefix for other strategies
         if self.organize_by == "sender":
             prefix = self._get_sender_path(email_header.sender)
         elif self.organize_by == "label" and labels:
@@ -73,6 +118,44 @@ class BackupManager:
 
         # Combine path
         full_path = self.backup_root / prefix / subject_dir / safe_filename
+
+        # Handle duplicates
+        full_path = self._handle_duplicate(full_path)
+
+        return full_path
+
+    def _get_type_organized_path(
+        self,
+        email_header: EmailHeader,
+        filename: str,
+    ) -> Path:
+        """Generate path organized by file type with date prefix.
+
+        Creates flat folders like:
+            backups/images/2005-04-09_photo.jpg
+            backups/documents/2008-01-15_report.pdf
+
+        Args:
+            email_header: Email header information.
+            filename: Original attachment filename.
+
+        Returns:
+            Full path with type folder and date-prefixed filename.
+        """
+        # Determine file category
+        category = get_file_category(filename)
+
+        # Create date prefix
+        date_prefix = email_header.date.strftime("%Y-%m-%d")
+
+        # Sanitize original filename
+        safe_filename = self._sanitize_filename(filename)
+
+        # Combine: {date}_{filename}
+        prefixed_filename = f"{date_prefix}_{safe_filename}"
+
+        # Full path: backups/{category}/{date}_{filename}
+        full_path = self.backup_root / category / prefixed_filename
 
         # Handle duplicates
         full_path = self._handle_duplicate(full_path)
@@ -179,6 +262,97 @@ class BackupManager:
                     pass  # Directory not empty
 
         return removed
+
+    def create_zip_archives(self, output_dir: Path | None = None) -> dict[str, Path]:
+        """Create zip archives for each file type category.
+
+        Args:
+            output_dir: Directory to save zip files. Defaults to backup_root.
+
+        Returns:
+            Dictionary mapping category names to zip file paths.
+        """
+        output_dir = output_dir or self.backup_root
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        created_zips: dict[str, Path] = {}
+
+        # Get all category folders
+        categories = ["images", "documents", "audio", "video", "other"]
+
+        for category in categories:
+            category_path = self.backup_root / category
+
+            if not category_path.exists() or not any(category_path.iterdir()):
+                continue
+
+            # Create zip file
+            zip_path = output_dir / f"{category}.zip"
+
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                file_count = 0
+                for file_path in category_path.rglob("*"):
+                    if file_path.is_file():
+                        # Store with relative path inside zip
+                        arcname = file_path.relative_to(category_path)
+                        zf.write(file_path, arcname)
+                        file_count += 1
+
+                if file_count > 0:
+                    created_zips[category] = zip_path
+
+        return created_zips
+
+    def get_category_stats(self) -> dict[str, dict[str, Any]]:
+        """Get statistics for each file type category.
+
+        Returns:
+            Dictionary with stats per category.
+        """
+        stats: dict[str, dict[str, Any]] = {}
+
+        categories = ["images", "documents", "audio", "video", "other"]
+
+        for category in categories:
+            category_path = self.backup_root / category
+
+            if not category_path.exists():
+                continue
+
+            file_count = 0
+            total_size = 0
+
+            for file_path in category_path.rglob("*"):
+                if file_path.is_file():
+                    file_count += 1
+                    total_size += file_path.stat().st_size
+
+            if file_count > 0:
+                stats[category] = {
+                    "file_count": file_count,
+                    "total_size": total_size,
+                    "total_size_human": self._format_size(total_size),
+                }
+
+        return stats
+
+    def _format_size(self, size: int) -> str:
+        """Format size in human-readable form.
+
+        Args:
+            size: Size in bytes.
+
+        Returns:
+            Human-readable size string.
+        """
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        elif size < 1024 * 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
     def _get_date_path(self, date: datetime) -> Path:
         """Generate date-based path component.

@@ -251,11 +251,14 @@ class BatchProcessor:
                 "error": replace_result.error,
             }
 
-        # Step 4: Update manifest
+        # Step 4: Update manifest with revert tracking info
         self.manifest.update_status(
             email_id,
             "completed",
             stripped_size=replace_result.new_size,
+            stripped_uid=replace_result.new_uid,
+            original_message_id=scan_result.header.message_id,
+            gmail_thread_id=str(scan_result.gmail_metadata.gmail_thread_id),
         )
 
         return {

@@ -28,7 +28,7 @@ class BackupConfig:
     """Backup storage configuration."""
 
     directory: Path = Path("./backups")
-    organize_by: str = "date"  # date, sender, label
+    organize_by: str = "type"  # type (default), date, sender, label
 
 
 @dataclass
@@ -132,7 +132,7 @@ def _parse_config(data: dict[str, Any]) -> Config:
         backup_data = data["backup"]
         config.backup = BackupConfig(
             directory=Path(backup_data.get("directory", "./backups")),
-            organize_by=backup_data.get("organize_by", "date"),
+            organize_by=backup_data.get("organize_by", "type"),
         )
 
     # Processing section
@@ -195,7 +195,7 @@ def validate_config(config: Config) -> list[str]:
         issues.append(f"Cannot create backup directory: {config.backup.directory}")
 
     # Validate organize_by option
-    valid_organize = {"date", "sender", "label"}
+    valid_organize = {"type", "date", "sender", "label"}
     if config.backup.organize_by not in valid_organize:
         issues.append(f"Invalid organize_by value: {config.backup.organize_by}")
 
@@ -226,7 +226,13 @@ oauth:
 
 backup:
   directory: "./backups"
-  organize_by: "date"
+  # Organization strategy:
+  #   type   - Flat folders by file type with date-prefixed filenames (default)
+  #            e.g., backups/images/2005-04-09_photo.jpg
+  #   date   - Nested year/month/day/subject folders
+  #   sender - Organized by sender domain/email
+  #   label  - Organized by Gmail label
+  organize_by: "type"
 
 processing:
   dry_run: true

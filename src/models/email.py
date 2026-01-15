@@ -202,10 +202,14 @@ class ManifestEntry:
     labels: list[str]
     attachments: list[dict[str, Any]]  # List of SavedAttachment.to_dict()
     processed_at: datetime
-    status: str  # pending, extracted, reconstructed, replaced, completed, failed
+    status: str  # pending, extracted, reconstructed, replaced, completed, failed, reverted
     original_size: int
     stripped_size: int | None = None
     error_message: str | None = None
+    # Revert tracking fields
+    stripped_uid: int | None = None  # UID of the stripped replacement email
+    original_message_id: str | None = None  # Message-ID header for finding in Trash
+    gmail_thread_id: str | None = None  # Thread ID to verify correct email
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
@@ -222,6 +226,9 @@ class ManifestEntry:
             "original_size": self.original_size,
             "stripped_size": self.stripped_size,
             "error_message": self.error_message,
+            "stripped_uid": self.stripped_uid,
+            "original_message_id": self.original_message_id,
+            "gmail_thread_id": self.gmail_thread_id,
         }
 
     @classmethod
@@ -240,7 +247,15 @@ class ManifestEntry:
             original_size=data["original_size"],
             stripped_size=data.get("stripped_size"),
             error_message=data.get("error_message"),
+            stripped_uid=data.get("stripped_uid"),
+            original_message_id=data.get("original_message_id"),
+            gmail_thread_id=data.get("gmail_thread_id"),
         )
+
+    @property
+    def can_revert(self) -> bool:
+        """Check if this entry can be reverted (original should be in Trash)."""
+        return self.status == "completed" and self.original_message_id is not None
 
 
 @dataclass
