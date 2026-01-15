@@ -82,6 +82,9 @@ gmail-clean process --email your-email@gmail.com --min-size 1MB --no-dry-run
 
 # Process with specific date range
 gmail-clean process --email your-email@gmail.com --before 2015-01-01 --min-size 10MB --no-dry-run
+
+# Process and create zip archives for each file type
+gmail-clean process --email your-email@gmail.com --min-size 1MB --no-dry-run --zip
 ```
 
 ### Check Status
@@ -117,7 +120,7 @@ oauth:
 
 backup:
   directory: "./backups"
-  organize_by: "date"  # date, sender, or label
+  organize_by: "type"  # type (default), date, sender, or label
 
 processing:
   dry_run: true
@@ -133,16 +136,58 @@ safety:
 
 ## Backup Structure
 
-Attachments are organized by date by default:
+By default, attachments are organized by file type with date-prefixed filenames for easy browsing and sorting:
 
 ```
 backups/
-└── 2024/
-    └── 01/
-        └── 15/
-            └── Meeting_Notes/
-                ├── presentation.pdf
-                └── spreadsheet.xlsx
+├── images/
+│   ├── 2005-04-09_vacation_photo.jpg
+│   ├── 2008-06-15_birthday.png
+│   └── 2010-12-25_christmas.heic
+├── documents/
+│   ├── 2006-03-20_report.pdf
+│   ├── 2009-11-10_spreadsheet.xlsx
+│   └── 2012-07-04_presentation.pptx
+├── audio/
+│   └── 2007-08-30_voicemail.mp3
+├── video/
+│   └── 2011-05-22_clip.mp4
+└── other/
+    └── 2013-02-14_archive.zip
+```
+
+**File type categories:**
+- **images**: jpg, jpeg, png, gif, bmp, webp, heic, heif, tiff, svg, raw, cr2, nef, psd
+- **documents**: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, rtf, odt, csv, md, html
+- **audio**: mp3, wav, m4a, flac, ogg, aac, wma, aiff, mid, midi
+- **video**: mp4, mov, avi, mkv, wmv, flv, webm, m4v, mpeg, mpg
+- **other**: everything else
+
+### Alternative Organization Strategies
+
+You can change `organize_by` in your config to use different structures:
+
+- **`type`** (default): Flat folders by file type with date-prefixed filenames
+- **`date`**: Nested year/month/day/subject folders
+- **`sender`**: Organized by sender domain and email
+- **`label`**: Organized by Gmail label
+
+### Creating Zip Archives
+
+Use the `--zip` flag with the process command to create zip archives for each file type category:
+
+```bash
+gmail-clean process --email your-email@gmail.com --no-dry-run --zip
+```
+
+This creates:
+```
+backups/
+├── images.zip
+├── documents.zip
+├── audio.zip
+├── video.zip
+└── other.zip
 ```
 
 A manifest file (`manifest.json`) tracks all processed emails and their backup locations.
@@ -168,7 +213,7 @@ The placeholder in the email body shows:
 [Attachment Removed]
 Filename: document.pdf
 Original Size: 2.5 MB
-Backup Location: backups/2024/01/15/Meeting_Notes/document.pdf
+Backup Location: backups/documents/2024-01-15_document.pdf
 ```
 
 ## Limitations
