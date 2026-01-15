@@ -36,17 +36,73 @@ pip install -r requirements.txt
 
 ## Google Cloud Setup
 
+This tool uses OAuth2 to access Gmail via IMAP. You need to create credentials in Google Cloud Console.
+
+### Step 1: Create a Google Cloud Project
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the **Gmail API** (APIs & Services > Library > search "Gmail API")
-4. Configure the **OAuth consent screen**:
-   - Choose "External" user type
-   - Add your email as a test user
-   - Add scope: `https://mail.google.com/`
-5. Create **OAuth credentials**:
-   - APIs & Services > Credentials > Create Credentials > OAuth client ID
-   - Application type: Desktop app
-   - Download the JSON file and save as `credentials.json`
+2. Click the project dropdown (top left, next to "Google Cloud")
+3. Click **New Project**
+4. Enter a project name (e.g., "Gmail Attachment Stripper")
+5. Click **Create**
+6. Wait for the project to be created, then select it from the dropdown
+
+### Step 2: Enable the Gmail API
+
+1. In the left sidebar, go to **APIs & Services** > **Library**
+2. Search for "Gmail API"
+3. Click on **Gmail API** in the results
+4. Click **Enable**
+
+### Step 3: Configure OAuth Consent Screen
+
+1. Go to **APIs & Services** > **OAuth consent screen**
+2. Select **External** user type (unless you have a Google Workspace organization)
+3. Click **Create**
+4. Fill in the required fields:
+   - **App name**: Gmail Attachment Stripper (or any name)
+   - **User support email**: Select your email
+   - **Developer contact email**: Enter your email
+5. Click **Save and Continue**
+6. On the **Scopes** page:
+   - Click **Add or Remove Scopes**
+   - In the filter box, search for `https://mail.google.com/`
+   - Check the box for `https://mail.google.com/` (Gmail full access)
+   - Click **Update**
+7. Click **Save and Continue**
+8. On the **Test users** page:
+   - Click **Add Users**
+   - Enter your Gmail address (the one you'll use with this tool)
+   - Click **Add**
+9. Click **Save and Continue**
+10. Review and click **Back to Dashboard**
+
+> **Note**: Your app will stay in "Testing" mode, which is fine for personal use. Only the test users you added can authenticate. If you skip adding test users, authentication will fail.
+
+### Step 4: Create OAuth Credentials
+
+1. Go to **APIs & Services** > **Credentials**
+2. Click **Create Credentials** > **OAuth client ID**
+3. Select **Desktop app** as the application type
+4. Enter a name (e.g., "Gmail Stripper Desktop")
+5. Click **Create**
+6. A dialog appears with your credentials - click **Download JSON**
+7. Save the file as `credentials.json` in your project directory
+
+### Step 5: Authenticate
+
+Run the auth command to complete OAuth setup:
+
+```bash
+gmail-clean auth --credentials credentials.json --email your-email@gmail.com
+```
+
+This will:
+1. Open your browser to Google's login page
+2. Ask you to sign in and grant permissions
+3. Save an encrypted token locally (`token.enc`)
+
+> **Token Expiry**: Access tokens expire after 1 hour. The tool automatically refreshes them using the refresh token. If you get authentication errors after some time, just run the `auth` command again.
 
 ## Usage
 
