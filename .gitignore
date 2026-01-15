@@ -75,6 +75,7 @@ venv.bak/
 .DS_Store
 Thumbs.db
 Desktop.ini
+nul
 
 # Project-specific: Credentials and tokens (NEVER commit these!)
 credentials.json
