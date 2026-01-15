@@ -442,6 +442,8 @@ def process(
                 else:
                     output.console.print("[yellow]No backup files found to zip.[/yellow]")
 
+    except typer.Exit:
+        raise  # Re-raise typer.Exit to avoid catching it as an error
     except Exception as e:
         output.print_error("Processing failed", str(e))
         raise typer.Exit(1)
@@ -715,6 +717,8 @@ def revert(
             output.console.print(f"  Successful: [green]{successful}[/green]")
             output.console.print(f"  Failed: [red]{failed}[/red]")
 
+    except typer.Exit:
+        raise  # Re-raise typer.Exit to avoid catching it as an error
     except Exception as e:
         output.print_error("Revert failed", str(e))
         raise typer.Exit(1)
