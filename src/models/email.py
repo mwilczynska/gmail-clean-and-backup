@@ -56,6 +56,28 @@ class AttachmentInfo:
     encoding: str | None = None  # Content-Transfer-Encoding
 
     @property
+    def estimated_decoded_size(self) -> int:
+        """Estimate actual decoded size accounting for encoding overhead.
+
+        IMAP BODYSTRUCTURE reports encoded size. Base64 encoding adds ~33% overhead,
+        so the actual file size after decoding is smaller.
+
+        Returns:
+            Estimated size after decoding.
+        """
+        if self.encoding and self.encoding.lower() == "base64":
+            # Base64 encoding: 4 encoded bytes = 3 decoded bytes
+            # So decoded size = encoded size * 3 / 4 = encoded size * 0.75
+            return self.size * 3 // 4
+        elif self.encoding and self.encoding.lower() == "quoted-printable":
+            # Quoted-printable typically has minimal overhead for text
+            # Estimate ~5% overhead on average
+            return int(self.size * 0.95)
+        else:
+            # No encoding or 7bit/8bit - size is accurate
+            return self.size
+
+    @property
     def is_inline(self) -> bool:
         """Check if this is an inline attachment (usually image)."""
         return self.content_disposition.lower() == "inline"
@@ -102,8 +124,17 @@ class EmailScanResult:
 
     @property
     def strippable_size(self) -> int:
-        """Total size of strippable attachments."""
+        """Total size of strippable attachments (encoded/raw size from IMAP)."""
         return sum(a.size for a in self.strippable_attachments)
+
+    @property
+    def estimated_strippable_size(self) -> int:
+        """Estimated actual backup size accounting for encoding overhead.
+
+        This is more accurate for estimating disk space savings since it
+        accounts for base64 decoding (~25% smaller than encoded size).
+        """
+        return sum(a.estimated_decoded_size for a in self.strippable_attachments)
 
     @property
     def can_process(self) -> bool:
@@ -264,9 +295,10 @@ class ScanStatistics:
 
     total_emails: int
     total_attachments: int
-    total_attachment_size: int
+    total_attachment_size: int  # Raw/encoded size from IMAP BODYSTRUCTURE
     emails_with_inline_only: int
     encrypted_emails_skipped: int
+    estimated_backup_size: int = 0  # Estimated actual size after decoding
     by_content_type: dict[str, int] = field(default_factory=dict)
     by_year: dict[int, int] = field(default_factory=dict)
     by_sender: dict[str, int] = field(default_factory=dict)
@@ -278,13 +310,23 @@ class ScanStatistics:
 
     @property
     def estimated_savings(self) -> int:
-        """Estimated bytes that could be freed."""
+        """Estimated bytes that could be freed (raw/encoded size)."""
         return self.total_attachment_size
 
     @property
     def estimated_savings_human(self) -> str:
-        """Human-readable estimated savings."""
+        """Human-readable estimated savings (raw/encoded size)."""
         size = self.estimated_savings
+        return self._format_size(size)
+
+    @property
+    def estimated_backup_size_human(self) -> str:
+        """Human-readable estimated backup size (decoded/actual size)."""
+        size = self.estimated_backup_size if self.estimated_backup_size > 0 else self.estimated_savings
+        return self._format_size(size)
+
+    def _format_size(self, size: int) -> str:
+        """Format size in human-readable form."""
         if size < 1024:
             return f"{size} B"
         elif size < 1024 * 1024:

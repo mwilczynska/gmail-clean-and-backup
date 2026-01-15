@@ -95,6 +95,9 @@ Tool: gmail-clean-and-backup
         # Parse original email
         original = self.parse_email(raw_email)
 
+        # Save the original Content-Type for recovery if needed
+        original_content_type = original.get("Content-Type")
+
         # Create mapping of filename to backup path
         backup_paths = {
             saved.original_filename: saved.saved_path for saved in saved_attachments
@@ -104,6 +107,21 @@ Tool: gmail-clean-and-backup
         reconstructed = self._strip_attachments(
             original, attachments_to_strip, backup_paths
         )
+
+        # Ensure Content-Type header exists before serialization
+        # Python's email library can lose Content-Type during set_payload()
+        if not reconstructed.get("Content-Type"):
+            logger.debug("Content-Type missing after reconstruction, recovering")
+            if original_content_type:
+                # Restore original Content-Type
+                reconstructed["Content-Type"] = original_content_type
+            elif reconstructed.is_multipart():
+                # Generate a Content-Type for multipart
+                boundary = reconstructed.get_boundary() or "===============boundary==============="
+                reconstructed["Content-Type"] = f"multipart/mixed; boundary=\"{boundary}\""
+            else:
+                # Default to text/plain
+                reconstructed["Content-Type"] = "text/plain; charset=utf-8"
 
         # Serialize back to bytes
         return self.serialize(reconstructed)
@@ -186,6 +204,11 @@ Tool: gmail-clean-and-backup
         # Get attachment info lookup
         attachment_info = {att.filename: att for att in attachments}
 
+        # Preserve the original Content-Type header before modifying payload
+        # set_payload() can clear or corrupt the Content-Type header
+        original_content_type = msg.get("Content-Type")
+        original_boundary = msg.get_boundary()
+
         # Build new payload list
         new_payload = []
         placeholders_added = []
@@ -243,6 +266,14 @@ Tool: gmail-clean-and-backup
 
         # Replace message payload
         msg.set_payload(new_payload)
+
+        # Restore the Content-Type header if it was lost or corrupted
+        # Python's email library can lose Content-Type during set_payload()
+        if original_content_type and not msg.get("Content-Type"):
+            msg["Content-Type"] = original_content_type
+        elif original_boundary and msg.get_boundary() != original_boundary:
+            # Boundary was corrupted, restore it
+            msg.set_boundary(original_boundary)
 
         return msg
 
@@ -321,6 +352,10 @@ class MIMETreeWalker:
             result = modifier(msg, depth)
             return result if result is not None else msg
 
+        # Preserve Content-Type header before modifying payload
+        original_content_type = msg.get("Content-Type")
+        original_boundary = msg.get_boundary()
+
         # Process each part
         new_parts = []
         for part in msg.iter_parts():
@@ -331,6 +366,12 @@ class MIMETreeWalker:
         # Update message with modified parts
         if new_parts:
             msg.set_payload(new_parts)
+
+        # Restore Content-Type header if lost
+        if original_content_type and not msg.get("Content-Type"):
+            msg["Content-Type"] = original_content_type
+        elif original_boundary and msg.get_boundary() != original_boundary:
+            msg.set_boundary(original_boundary)
 
         return msg
 

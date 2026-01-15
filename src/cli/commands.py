@@ -129,15 +129,10 @@ def scan(
         help="Export results to CSV file",
     ),
     limit: int = typer.Option(
-        100,
+        0,
         "--limit",
         "-l",
-        help="Maximum emails to scan",
-    ),
-    show_all: bool = typer.Option(
-        False,
-        "--show-all",
-        help="Show all scanned emails in output (default shows first 20)",
+        help="Maximum emails to scan (0 = no limit)",
     ),
 ) -> None:
     """Scan mailbox for emails with attachments.
@@ -211,9 +206,9 @@ def scan(
 
             output.console.print(f"Found {len(uids)} matching emails")
 
-            # Limit results
-            if len(uids) > limit:
-                output.console.print(f"Limiting scan to first {limit} emails")
+            # Limit results if --limit is set
+            if limit > 0 and len(uids) > limit:
+                output.console.print(f"Limiting scan to first {limit} emails (use --limit 0 for no limit)")
                 uids = uids[:limit]
 
             # Scan emails
@@ -234,9 +229,8 @@ def scan(
             output.console.print()
             output.print_statistics(stats)
             output.console.print()
-            # Show all results if --show-all, otherwise show up to the scan limit
-            display_limit = len(results) if show_all else min(limit, len(results))
-            output.print_scan_results(results, limit=display_limit)
+            # Show all results by default
+            output.print_scan_results(results, limit=len(results))
 
             # Export if requested
             if export:
@@ -406,10 +400,12 @@ def process(
             )
 
             with output.create_progress_bar() as progress:
-                task = progress.add_task("Processing...", total=len(results))
+                # Total steps: each email has 4 steps (extract, backup, reconstruct, upload)
+                total_steps = len(results) * 4
+                task = progress.add_task("Processing...", total=total_steps)
 
                 def progress_callback(current: int, total: int, message: str) -> None:
-                    progress.update(task, completed=current, description=message[:50])
+                    progress.update(task, completed=current, total=total, description=message[:50])
 
                 batch_result = processor.process_batch(
                     results, dry_run=False, progress_callback=progress_callback
@@ -702,12 +698,12 @@ def revert(
                     if result.success:
                         successful += 1
                         output.console.print(
-                            f"  [green]✓[/green] Reverted: {entry.subject[:50]}"
+                            f"  [green][OK][/green] Reverted: {entry.subject[:50]}"
                         )
                     else:
                         failed += 1
                         output.console.print(
-                            f"  [red]✗[/red] Failed: {entry.subject[:50]} - {result.error}"
+                            f"  [red][FAIL][/red] Failed: {entry.subject[:50]} - {result.error}"
                         )
 
                     progress.update(task, advance=1)

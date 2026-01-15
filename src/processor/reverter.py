@@ -171,6 +171,20 @@ class EmailReverter:
             labels_applied=entry.labels,  # Would be applied
         )
 
+    def _get_trash_folder(self) -> str:
+        """Get the Trash folder name (varies by locale).
+
+        Returns:
+            Trash folder name (e.g., '[Gmail]/Trash' or '[Gmail]/Bin').
+        """
+        folders = self.client.list_folders()
+        # Check for common Trash folder names
+        for folder in folders:
+            if folder in ("[Gmail]/Trash", "[Gmail]/Bin", "[Gmail]/Papierkorb"):
+                return folder
+        # Fallback to default
+        return "[Gmail]/Trash"
+
     def _find_in_trash(self, message_id: str | None) -> int | None:
         """Find email in Trash by Message-ID header.
 
@@ -183,8 +197,9 @@ class EmailReverter:
         if not message_id:
             return None
 
-        # Select Trash folder
-        self.client.select_folder("[Gmail]/Trash", readonly=True)
+        # Select Trash folder (handle different locales)
+        trash_folder = self._get_trash_folder()
+        self.client.select_folder(trash_folder, readonly=True)
 
         # Search by Message-ID using Gmail's IMAP search
         # Escape any special characters in Message-ID
@@ -209,7 +224,8 @@ class EmailReverter:
             UID of restored email in All Mail, or None if failed.
         """
         # First, fetch the raw email from Trash
-        self.client.select_folder("[Gmail]/Trash", readonly=False)
+        trash_folder = self._get_trash_folder()
+        self.client.select_folder(trash_folder, readonly=False)
         raw_email = self.client.fetch_raw_email(trash_uid)
 
         if not raw_email:

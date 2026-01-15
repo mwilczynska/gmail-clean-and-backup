@@ -420,16 +420,39 @@ class GmailIMAPClient:
     def move_to_trash(self, uid: int) -> bool:
         """Move message to Gmail Trash.
 
+        For Gmail, the proper way to move to Trash is to add the \\Trash label
+        or use IMAP MOVE. Simply deleting doesn't work in [Gmail]/All Mail.
+
         Args:
             uid: Message UID.
 
         Returns:
             True if successful.
         """
-        # Copy to trash, then delete from current folder
-        if self.copy_to_folder(uid, "[Gmail]/Trash"):
-            return self.delete_message(uid)
-        return False
+        self._ensure_connected()
+        self._ensure_folder_selected()
+
+        try:
+            # For Gmail, we use X-GM-LABELS to add the Trash label
+            # This effectively moves the message to Trash
+            status, _ = self._connection.uid(  # type: ignore
+                "STORE", str(uid), "+X-GM-LABELS", "(\\Trash)"
+            )
+            if status == "OK":
+                # Also remove from Inbox if present (to complete the "move")
+                self._connection.uid(  # type: ignore
+                    "STORE", str(uid), "-X-GM-LABELS", "(\\Inbox)"
+                )
+                return True
+            return False
+        except Exception:
+            # Fallback: try copy to Trash folder then mark deleted
+            try:
+                if self.copy_to_folder(uid, "[Gmail]/Trash"):
+                    return self.delete_message(uid)
+            except Exception:
+                pass
+            return False
 
     def expunge(self) -> None:
         """Permanently remove messages marked as deleted."""
@@ -541,8 +564,8 @@ class GmailIMAPClient:
                 if match:
                     key = f"BODY[{match.group(1)}]"
                     result[key] = body
-            elif "RFC822}" in header or header.strip().endswith("RFC822"):
-                # Only match RFC822 if it's a literal fetch, not RFC822.SIZE
+            elif "RFC822 {" in header or "RFC822}" in header or header.strip().endswith("RFC822"):
+                # Match RFC822 with literal size indicator (RFC822 {1234}) or closing brace
                 result["RFC822"] = body
 
     def _parse_combined_headers(self, combined: str, result: dict[str, Any]) -> None:

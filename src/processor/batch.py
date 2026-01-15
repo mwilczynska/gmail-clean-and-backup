@@ -141,33 +141,43 @@ class BatchProcessor:
         total_bytes_saved = 0
         errors: list[dict[str, Any]] = []
 
+        # Calculate total steps: each email has 4 steps (extract, backup, reconstruct, upload)
+        # Plus 1 step for skipped emails (just checking)
+        total_steps = len(scan_results) * 4
+        current_step = 0
+
         for i, scan_result in enumerate(scan_results):
             email_id = str(scan_result.gmail_metadata.gmail_message_id)
             uid = scan_result.header.uid
-            subject = scan_result.header.subject[:40]
-
-            if progress_callback:
-                progress_callback(
-                    i + 1,
-                    len(scan_results),
-                    f"Processing: {subject}...",
-                )
+            subject = scan_result.header.subject[:30]
 
             # Check if processable
             if not scan_result.can_process:
                 skipped += 1
+                current_step += 4  # Skip all steps for this email
+                if progress_callback:
+                    progress_callback(current_step, total_steps, f"Skipped: {subject}...")
                 logger.debug(f"Skipped UID {uid}: not processable")
                 continue
 
             # Check if already processed
             if self.manifest.is_processed(email_id):
                 skipped += 1
+                current_step += 4  # Skip all steps for this email
+                if progress_callback:
+                    progress_callback(current_step, total_steps, f"Already done: {subject}...")
                 logger.debug(f"Skipped UID {uid}: already processed")
                 continue
 
             try:
-                # Process single email
-                result = self._process_single(scan_result)
+                # Process single email with step-by-step progress
+                result = self._process_single_with_progress(
+                    scan_result,
+                    progress_callback,
+                    current_step,
+                    total_steps,
+                )
+                current_step += 4  # All 4 steps completed
 
                 if result["success"]:
                     successful += 1
@@ -184,6 +194,7 @@ class BatchProcessor:
 
             except Exception as e:
                 failed += 1
+                current_step += 4  # Move past this email's steps
                 errors.append({"email_id": email_id, "error": str(e)})
                 self.op_logger.log_error("process", email_id, e)
 
@@ -212,10 +223,34 @@ class BatchProcessor:
         Returns:
             Dictionary with processing result.
         """
+        return self._process_single_with_progress(scan_result, None, 0, 1)
+
+    def _process_single_with_progress(
+        self,
+        scan_result: EmailScanResult,
+        progress_callback: Callable[[int, int, str], None] | None,
+        base_step: int,
+        total_steps: int,
+    ) -> dict[str, Any]:
+        """Process a single email with step-by-step progress updates.
+
+        Args:
+            scan_result: Email scan result.
+            progress_callback: Optional callback(current, total, message).
+            base_step: Starting step number for this email.
+            total_steps: Total steps in the batch.
+
+        Returns:
+            Dictionary with processing result.
+        """
         uid = scan_result.header.uid
         email_id = str(scan_result.gmail_metadata.gmail_message_id)
+        subject = scan_result.header.subject[:25]
 
         # Step 1: Extract attachments
+        if progress_callback:
+            progress_callback(base_step + 1, total_steps, f"Extracting: {subject}...")
+
         extraction = self.extractor.extract_email(uid, scan_result)
 
         if not extraction.success:
@@ -224,7 +259,10 @@ class BatchProcessor:
                 "error": f"Extraction failed: {extraction.errors}",
             }
 
-        # Step 2: Record in manifest
+        # Step 2: Record in manifest (backup tracking)
+        if progress_callback:
+            progress_callback(base_step + 2, total_steps, f"Backing up: {subject}...")
+
         self.manifest.record_extraction(
             email_id=email_id,
             imap_uid=uid,
@@ -237,10 +275,18 @@ class BatchProcessor:
             status="extracted",
         )
 
-        # Step 3: Replace email
+        # Step 3: Reconstruct and upload email without attachments
+        # (This is where the heavy work happens - MIME reconstruction + IMAP upload)
+        if progress_callback:
+            progress_callback(base_step + 3, total_steps, f"Rebuilding: {subject}...")
+
         replace_result = self.replacer.replace_email(
             uid, scan_result, extraction, dry_run=False
         )
+
+        # Step 4: Finalize (verify upload, move original to trash)
+        if progress_callback:
+            progress_callback(base_step + 4, total_steps, f"Finalizing: {subject}...")
 
         if not replace_result.success:
             self.manifest.update_status(
@@ -251,7 +297,7 @@ class BatchProcessor:
                 "error": replace_result.error,
             }
 
-        # Step 4: Update manifest with revert tracking info
+        # Update manifest with revert tracking info
         self.manifest.update_status(
             email_id,
             "completed",

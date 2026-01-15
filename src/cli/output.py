@@ -69,10 +69,12 @@ class RichOutput:
         Args:
             stats: Scan statistics.
         """
+        # Show both raw size (from IMAP) and estimated backup size (after decoding)
         panel_content = f"""
 [bold]Total Emails:[/bold] {stats.total_emails}
 [bold]Total Attachments:[/bold] {stats.total_attachments}
-[bold]Estimated Savings:[/bold] [green]{stats.estimated_savings_human}[/green]
+[bold]Gmail Space Used:[/bold] [green]{stats.estimated_savings_human}[/green] [dim](encoded size)[/dim]
+[bold]Est. Backup Size:[/bold] [cyan]{stats.estimated_backup_size_human}[/cyan] [dim](actual file size)[/dim]
 
 [bold]Processable:[/bold] {stats.processable_emails}
 [bold]Encrypted (skipped):[/bold] {stats.encrypted_emails_skipped}
@@ -197,8 +199,10 @@ class RichOutput:
         Returns:
             Progress instance.
         """
+        # Use ASCII-compatible spinner for Windows legacy console compatibility
+        # The default spinner uses Unicode braille characters that fail on cp1252
         return Progress(
-            SpinnerColumn(),
+            SpinnerColumn(spinner_name="line"),  # ASCII-safe: - \ | /
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),

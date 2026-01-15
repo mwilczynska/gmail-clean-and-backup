@@ -136,6 +136,7 @@ class EmailScanner:
             total_attachment_size=0,
             emails_with_inline_only=0,
             encrypted_emails_skipped=0,
+            estimated_backup_size=0,
             by_content_type={},
             by_year={},
             by_sender={},
@@ -155,6 +156,8 @@ class EmailScanner:
 
             stats.total_attachments += len(strippable)
             stats.total_attachment_size += result.strippable_size
+            # Add estimated decoded size (accounts for base64 overhead)
+            stats.estimated_backup_size += result.estimated_strippable_size
 
             # By content type
             for att in strippable:
