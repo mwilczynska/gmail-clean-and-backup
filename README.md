@@ -1,6 +1,6 @@
 # Gmail Attachment Stripper with Backup
 
-A Python CLI tool that safely removes attachments from Gmail emails while preserving email integrity, threading, and labels. Attachments are backed up locally before removal.
+A Python CLI tool that safely removes attachments from Gmail emails while preserving email integrity, threading, and labels. Attachments are backed up locally before removal. This tool allows cleaning of google drive storage space with greater control and functionality that google's native tools.
 
 ## Features
 
