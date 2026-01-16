@@ -3,6 +3,7 @@
 import imaplib
 import re
 import ssl
+import time
 from typing import Any
 
 from src.auth.oauth import GmailOAuth
@@ -25,6 +26,7 @@ class GmailIMAPClient:
 
     Provides a high-level interface for Gmail IMAP operations with
     automatic OAuth2 authentication using XOAUTH2 mechanism.
+    Includes automatic retry logic and reconnection on connection failures.
     """
 
     IMAP_HOST = "imap.gmail.com"
@@ -35,17 +37,36 @@ class GmailIMAPClient:
     GMAIL_EXTENSION_THRID = "X-GM-THRID"
     GMAIL_EXTENSION_LABELS = "X-GM-LABELS"
 
-    def __init__(self, oauth_handler: GmailOAuth, email_address: str) -> None:
+    # Retry configuration
+    DEFAULT_MAX_RETRIES = 3
+    DEFAULT_RETRY_DELAY = 2.0  # seconds
+    DEFAULT_OPERATION_DELAY = 0.5  # seconds between operations
+
+    def __init__(
+        self,
+        oauth_handler: GmailOAuth,
+        email_address: str,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_delay: float = DEFAULT_RETRY_DELAY,
+        operation_delay: float = DEFAULT_OPERATION_DELAY,
+    ) -> None:
         """Initialize client with OAuth handler and target email.
 
         Args:
             oauth_handler: Configured GmailOAuth instance.
             email_address: Gmail address to authenticate.
+            max_retries: Maximum retry attempts for failed operations.
+            retry_delay: Base delay between retries (uses exponential backoff).
+            operation_delay: Delay between operations to avoid rate limits.
         """
         self.oauth_handler = oauth_handler
         self.email_address = email_address
         self._connection: imaplib.IMAP4_SSL | None = None
         self._selected_folder: str | None = None
+        self._max_retries = max_retries
+        self._retry_delay = retry_delay
+        self._operation_delay = operation_delay
+        self._last_operation_time: float = 0
 
     def connect(self) -> None:
         """Establish SSL connection to Gmail IMAP server.
@@ -218,6 +239,26 @@ class GmailIMAPClient:
             Dictionary with fetched data.
 
         Raises:
+            IMAPConnectionError: If fetch fails after retries.
+        """
+        return self._retry_with_reconnect(
+            f"Fetch UID {uid}",
+            self._fetch_internal,
+            uid,
+            parts,
+        )
+
+    def _fetch_internal(self, uid: int, parts: str) -> dict[str, Any]:
+        """Internal fetch implementation without retry logic.
+
+        Args:
+            uid: Message UID.
+            parts: IMAP FETCH parts specification.
+
+        Returns:
+            Dictionary with fetched data.
+
+        Raises:
             IMAPConnectionError: If fetch fails.
         """
         self._ensure_connected()
@@ -319,6 +360,36 @@ class GmailIMAPClient:
             UID of appended message, or None if unknown.
 
         Raises:
+            IMAPConnectionError: If append fails after retries.
+        """
+        return self._retry_with_reconnect(
+            f"Append to {folder}",
+            self._append_internal,
+            folder,
+            email_data,
+            flags,
+            date_time,
+        )
+
+    def _append_internal(
+        self,
+        folder: str,
+        email_data: bytes,
+        flags: list[str] | None = None,
+        date_time: Any = None,
+    ) -> int | None:
+        """Internal append implementation without retry logic.
+
+        Args:
+            folder: Target folder name.
+            email_data: Raw email bytes (RFC822 format).
+            flags: List of IMAP flags (e.g., ["\\Seen"]).
+            date_time: Internal date for message.
+
+        Returns:
+            UID of appended message, or None if unknown.
+
+        Raises:
             IMAPConnectionError: If append fails.
         """
         self._ensure_connected()
@@ -362,8 +433,18 @@ class GmailIMAPClient:
             True if successful.
 
         Raises:
-            IMAPConnectionError: If operation fails.
+            IMAPConnectionError: If operation fails after retries.
         """
+        return self._retry_with_reconnect(
+            f"Store labels for UID {uid}",
+            self._store_labels_internal,
+            uid,
+            labels,
+            action,
+        )
+
+    def _store_labels_internal(self, uid: int, labels: list[str], action: str = "+") -> bool:
+        """Internal store labels implementation without retry logic."""
         self._ensure_connected()
         self._ensure_folder_selected()
 
@@ -388,16 +469,25 @@ class GmailIMAPClient:
         Returns:
             True if successful.
         """
+        try:
+            return self._retry_with_reconnect(
+                f"Copy UID {uid} to {folder}",
+                self._copy_to_folder_internal,
+                uid,
+                folder,
+            )
+        except IMAPConnectionError:
+            return False
+
+    def _copy_to_folder_internal(self, uid: int, folder: str) -> bool:
+        """Internal copy to folder implementation without retry logic."""
         self._ensure_connected()
         self._ensure_folder_selected()
 
-        try:
-            # Quote folder name for IMAP
-            quoted_folder = f'"{folder}"'
-            status, _ = self._connection.uid("COPY", str(uid), quoted_folder)  # type: ignore
-            return status == "OK"
-        except Exception:
-            return False
+        # Quote folder name for IMAP
+        quoted_folder = f'"{folder}"'
+        status, _ = self._connection.uid("COPY", str(uid), quoted_folder)  # type: ignore
+        return status == "OK"
 
     def delete_message(self, uid: int) -> bool:
         """Mark message as deleted (will be removed on EXPUNGE).
@@ -408,14 +498,22 @@ class GmailIMAPClient:
         Returns:
             True if successful.
         """
+        try:
+            return self._retry_with_reconnect(
+                f"Delete UID {uid}",
+                self._delete_message_internal,
+                uid,
+            )
+        except IMAPConnectionError:
+            return False
+
+    def _delete_message_internal(self, uid: int) -> bool:
+        """Internal delete message implementation without retry logic."""
         self._ensure_connected()
         self._ensure_folder_selected()
 
-        try:
-            status, _ = self._connection.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")  # type: ignore
-            return status == "OK"
-        except Exception:
-            return False
+        status, _ = self._connection.uid("STORE", str(uid), "+FLAGS", "(\\Deleted)")  # type: ignore
+        return status == "OK"
 
     def move_to_trash(self, uid: int) -> bool:
         """Move message to Gmail Trash.
@@ -429,23 +527,13 @@ class GmailIMAPClient:
         Returns:
             True if successful.
         """
-        self._ensure_connected()
-        self._ensure_folder_selected()
-
         try:
-            # For Gmail, we use X-GM-LABELS to add the Trash label
-            # This effectively moves the message to Trash
-            status, _ = self._connection.uid(  # type: ignore
-                "STORE", str(uid), "+X-GM-LABELS", "(\\Trash)"
+            return self._retry_with_reconnect(
+                f"Move UID {uid} to trash",
+                self._move_to_trash_internal,
+                uid,
             )
-            if status == "OK":
-                # Also remove from Inbox if present (to complete the "move")
-                self._connection.uid(  # type: ignore
-                    "STORE", str(uid), "-X-GM-LABELS", "(\\Inbox)"
-                )
-                return True
-            return False
-        except Exception:
+        except IMAPConnectionError:
             # Fallback: try copy to Trash folder then mark deleted
             try:
                 if self.copy_to_folder(uid, "[Gmail]/Trash"):
@@ -453,6 +541,24 @@ class GmailIMAPClient:
             except Exception:
                 pass
             return False
+
+    def _move_to_trash_internal(self, uid: int) -> bool:
+        """Internal move to trash implementation without retry logic."""
+        self._ensure_connected()
+        self._ensure_folder_selected()
+
+        # For Gmail, we use X-GM-LABELS to add the Trash label
+        # This effectively moves the message to Trash
+        status, _ = self._connection.uid(  # type: ignore
+            "STORE", str(uid), "+X-GM-LABELS", "(\\Trash)"
+        )
+        if status == "OK":
+            # Also remove from Inbox if present (to complete the "move")
+            self._connection.uid(  # type: ignore
+                "STORE", str(uid), "-X-GM-LABELS", "(\\Inbox)"
+            )
+            return True
+        return False
 
     def expunge(self) -> None:
         """Permanently remove messages marked as deleted."""
@@ -472,6 +578,108 @@ class GmailIMAPClient:
         """
         if self._connection is None:
             raise IMAPConnectionError("Not connected. Call connect() and authenticate() first.")
+
+    def _throttle_operation(self) -> None:
+        """Apply rate limiting delay between operations."""
+        if self._operation_delay > 0:
+            elapsed = time.time() - self._last_operation_time
+            if elapsed < self._operation_delay:
+                time.sleep(self._operation_delay - elapsed)
+        self._last_operation_time = time.time()
+
+    def _reconnect(self) -> None:
+        """Reconnect to IMAP server after connection loss."""
+        # Store the previously selected folder
+        previous_folder = self._selected_folder
+
+        # Force close existing connection
+        if self._connection is not None:
+            try:
+                self._connection.logout()
+            except Exception:
+                pass
+            self._connection = None
+            self._selected_folder = None
+
+        # Reconnect and authenticate
+        self.connect()
+        self.authenticate()
+
+        # Reselect folder if one was selected
+        if previous_folder:
+            self.select_folder(previous_folder, readonly=False)
+
+    def _is_connection_error(self, error: Exception) -> bool:
+        """Check if an exception indicates a connection failure.
+
+        Args:
+            error: The exception to check.
+
+        Returns:
+            True if the error is a recoverable connection issue.
+        """
+        error_str = str(error).lower()
+        connection_indicators = [
+            "eof",
+            "socket error",
+            "connection reset",
+            "broken pipe",
+            "connection refused",
+            "timed out",
+            "timeout",
+            "ssl",
+            "socket.gaierror",
+        ]
+        return any(indicator in error_str for indicator in connection_indicators)
+
+    def _retry_with_reconnect(
+        self, operation_name: str, operation_func: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        """Execute an operation with retry logic and automatic reconnection.
+
+        Args:
+            operation_name: Name of the operation for error messages.
+            operation_func: The function to execute.
+            *args: Positional arguments for the function.
+            **kwargs: Keyword arguments for the function.
+
+        Returns:
+            The result of the operation.
+
+        Raises:
+            IMAPConnectionError: If all retries are exhausted.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                self._throttle_operation()
+                return operation_func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+
+                # Check if this is a connection error that we should retry
+                if not self._is_connection_error(e):
+                    # Not a connection error, don't retry
+                    raise
+
+                if attempt < self._max_retries:
+                    # Calculate exponential backoff delay
+                    delay = self._retry_delay * (2 ** attempt)
+                    # Log retry attempt (suppress for now, could add logging)
+                    time.sleep(delay)
+
+                    # Try to reconnect
+                    try:
+                        self._reconnect()
+                    except Exception:
+                        # Reconnection failed, will try again on next attempt
+                        pass
+
+        # All retries exhausted
+        raise IMAPConnectionError(
+            f"{operation_name} failed after {self._max_retries + 1} attempts: {last_error}"
+        ) from last_error
 
     def _ensure_folder_selected(self) -> None:
         """Ensure a folder is selected.
