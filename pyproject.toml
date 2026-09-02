@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "Your Name", email = "your-email@example.com"}
+    {name = "Michael Wilczynska"}
 ]
 keywords = ["gmail", "email", "attachments", "backup", "imap", "oauth2"]
 classifiers = [

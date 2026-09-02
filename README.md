@@ -1,27 +1,74 @@
-# Gmail Attachment Stripper with Backup
+# Gmail Clean and Backup
 
-A Python CLI tool that safely removes attachments from Gmail emails while preserving email integrity, threading, and labels. Attachments are backed up locally before removal. This tool allows cleaning of Google drive storage space with greater control and functionality over Google's native tools.
+A Python CLI that reclaims Google account storage by **removing large attachments from old Gmail messages while keeping the emails themselves intact** — the sender, subject, body, date, threading and labels all survive. Every attachment is downloaded, hashed and filed into a local archive *before* anything is changed in the mailbox, and the original message stays recoverable from Gmail's Trash.
 
-## Features
+The result: your mail history stays searchable and readable, your attachments live on a drive you control, and the gigabytes go back to your quota.
 
-- **OAuth2 Authentication** - Secure Gmail access via IMAP with encrypted token storage
-- **Smart Search** - Filter emails by size, date, sender, and labels using Gmail search syntax
-- **Safe Extraction** - Download attachments to organized backup directory with SHA-256 verification
-- **Preserve Threading** - Maintains Message-ID, References, and In-Reply-To headers
-- **Label Preservation** - Restores Gmail labels after email replacement
-- **Two-Phase Replace** - Upload verified replacement before deleting original
-- **Transaction Logging** - Recovery from interruptions with JSONL transaction logs
-- **Dry Run Mode** - Preview changes before making modifications
-- **Revert Capability** - Restore original emails from Trash within 30 days if needed
+---
 
-## Installation
+## The problem
 
-### Prerequisites
+Google counts Gmail attachments against the same 15 GB shared with Drive and Photos. The built-in remedies are all-or-nothing:
 
-- Python 3.10 or higher
-- A Google Cloud project with Gmail API enabled
+| Google's option | What it costs you |
+|---|---|
+| `has:attachment larger:10M` → Delete | Loses the entire conversation — body, context, thread |
+| Google Takeout | Exports everything, frees nothing |
+| Buy more storage | A recurring bill for files from 2008 |
 
-### Install from source
+There is no native way to say *"keep the email, drop the 25 MB tarball, and put the tarball on my NAS."* That is what this tool does.
+
+## What it does
+
+For each matching message, the tool rebuilds the email from scratch without its attachment parts, substituting a plain-text placeholder that records where the file went:
+
+```
+[Attachment Removed]
+Filename: presentation.pptx
+Original Size: 12.4 MB
+Backup Location: backups/documents/2014-03-21_presentation.pptx
+```
+
+The rebuilt message replaces the original in Gmail. Because the reconstruction preserves `Message-ID`, `In-Reply-To` and `References`, the message stays stitched into its thread; because labels are re-applied after upload, it stays where you filed it.
+
+```mermaid
+flowchart LR
+    A[Scan<br/>BODYSTRUCTURE] --> B[Extract<br/>+ SHA-256]
+    B --> C[Archive<br/>to disk]
+    C --> D[Reconstruct<br/>MIME tree]
+    D --> E[Validate<br/>headers]
+    E --> F[Upload<br/>+ verify]
+    F --> G[Re-apply<br/>labels]
+    G --> H[Original<br/>to Trash]
+```
+
+Each stage is journaled to an append-only transaction log, so an interrupted run can be resumed rather than restarted.
+
+## Engineering notes
+
+The interesting parts of this project are the ones that protect against data loss.
+
+**Scanning is cheap.** Finding candidates never downloads a message. The scanner issues a single IMAP `FETCH` for `BODY[HEADER] BODYSTRUCTURE X-GM-MSGID X-GM-THRID X-GM-LABELS RFC822.SIZE` and parses the MIME tree description the server returns, so a mailbox of tens of thousands of messages can be surveyed on header traffic alone. Full bodies are pulled only for messages you actually process.
+
+**Reconstruction is structural, not textual.** The tool walks the parsed MIME tree with Python's `email` package, drops parts whose `Content-Disposition` marks them as attachments, and re-serialises. Inline images referenced by HTML bodies (`Content-Disposition: inline`) are deliberately kept, so HTML mail doesn't end up full of broken image icons. Single-part messages, `multipart/alternative`, `multipart/related` and nested `multipart/mixed` are each handled on their own terms.
+
+**Nothing is deleted until the replacement is proven.** Replacement is a seven-phase commit: fetch original → reconstruct → validate → `APPEND` the new message → re-fetch and verify the upload → re-apply labels → *only then* move the original to Trash. A failure at any phase aborts before the destructive step, and rollback deletes the partial upload.
+
+**Validation is a hard gate.** Before upload, the reconstructed message is re-parsed from its serialised bytes and checked against the original: `Message-ID`, `Date`, `From`, `Subject`, `In-Reply-To` and `References` must match exactly, and the MIME structure must still be well-formed. Any mismatch fails that message and leaves the original untouched — in real-world use this gate is what caught a `References` header being rewritten during serialisation, on messages that would otherwise have been silently detached from their threads.
+
+**Integrity is verifiable after the fact.** Every extracted attachment is SHA-256 hashed on the way to disk, and the digest is stored in the manifest alongside the message ID, thread ID, labels and byte sizes — so you can prove months later that an archived file is bit-identical to what left the mailbox.
+
+**Interruptions are recoverable.** Every phase transition is appended to a JSONL transaction log. On restart, incomplete transactions are replayed from their last recorded state: a run that died after upload but before label restoration resumes at the label step rather than duplicating the message.
+
+**Mistakes are reversible.** Because originals go to Trash rather than being expunged, `revert` can locate an original by `Message-ID`, restore it to All Mail with its labels, and remove the stripped copy — for as long as Gmail retains the Trash (about 30 days).
+
+**Credentials are encrypted at rest.** OAuth tokens are sealed with Fernet using a key derived by PBKDF2-HMAC-SHA256 at 480,000 iterations (the OWASP recommendation), so `token.enc` is not a plaintext bearer credential sitting in the project directory.
+
+> Used against a real 20-year personal archive: 273 messages processed, ~2.4 GB reclaimed, no broken threads. The handful of failures were refusals by the validation gate — which is the gate working.
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/mwilczynska/gmail-clean-and-backup.git
@@ -29,315 +76,161 @@ cd gmail-clean-and-backup
 pip install -e .
 ```
 
-Or install dependencies directly:
+You need Python 3.10+ and OAuth credentials from a Google Cloud project — see [setup](#google-cloud-setup) below.
 
 ```bash
-pip install -r requirements.txt
+# 1. Authenticate once — opens a browser, stores an encrypted token
+gmail-clean auth --credentials credentials.json --email you@gmail.com
+
+# 2. See what's eligible, without touching anything
+gmail-clean scan --email you@gmail.com --min-size 5MB --before 2020-01-01
+
+# 3. Preview the exact changes (dry run is the default)
+gmail-clean process --email you@gmail.com --min-size 5MB --before 2020-01-01
+
+# 4. Commit them
+gmail-clean process --email you@gmail.com --min-size 5MB --before 2020-01-01 --no-dry-run
 ```
 
-## Google Cloud Setup
+**Start small.** Add `--limit 5` to your first live run for a five-message trial, and confirm the results in Gmail before turning it loose on twenty years of mail.
 
-This tool uses OAuth2 to access Gmail via IMAP. You need to create credentials in Google Cloud Console.
+## Commands
 
-### Step 1: Create a Google Cloud Project
+| Command | Purpose |
+|---|---|
+| `auth` | One-time OAuth2 flow; writes an encrypted `token.enc` |
+| `scan` | Report on eligible messages without modifying anything (`--export` to CSV) |
+| `process` | Extract, archive and strip attachments (**dry run unless `--no-dry-run`**) |
+| `status` | Processing statistics and storage reclaimed to date |
+| `revert` | Restore originals from Trash (`--list` to see what's still revertible) |
+| `export-manifest` | Dump the processing manifest as JSON or CSV |
+| `cleanup` | Prune old transaction logs and empty backup directories |
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Click the project dropdown (top left, next to "Google Cloud")
-3. Click **New Project**
-4. Enter a project name (e.g., "Gmail Attachment Stripper")
-5. Click **Create**
-6. Wait for the project to be created, then select it from the dropdown
+Filtering works the same way on `scan` and `process`: `--min-size 10MB` and `--before 2015-01-01`, where dates may be absolute (`YYYY-MM-DD`) or relative (`30d`, `6m`, `1y`). Both take `--limit N` to cap how many messages the run touches — the safest way to trial a change. `scan` additionally takes `--after` and `--export results.csv`; `process` takes `--batch-size N` (the per-run ceiling, default 50) and `--zip`. `--yes` skips confirmation prompts on `process`, `revert` and `cleanup`, and `--config path.yaml` works everywhere.
 
-### Step 2: Enable the Gmail API
+Run `gmail-clean <command> --help` for the full set.
 
-1. In the left sidebar, go to **APIs & Services** > **Library**
-2. Search for "Gmail API"
-3. Click on **Gmail API** in the results
-4. Click **Enable**
+## Where your attachments end up
 
-### Step 3: Configure OAuth Consent Screen
+By default files are grouped by type with a date prefix, which makes an archive you can actually browse:
 
-1. Go to **APIs & Services** > **OAuth consent screen**
-2. Select **External** user type (unless you have a Google Workspace organization)
-3. Click **Create**
-4. Fill in the required fields:
-   - **App name**: Gmail Attachment Stripper (or any name)
-   - **User support email**: Select your email
-   - **Developer contact email**: Enter your email
-5. Click **Save and Continue**
-6. On the **Scopes** page:
-   - Click **Add or Remove Scopes**
-   - In the filter box, search for `https://mail.google.com/`
-   - Check the box for `https://mail.google.com/` (Gmail full access)
-   - Click **Update**
-7. Click **Save and Continue**
-8. On the **Test users** page:
-   - Click **Add Users**
-   - Enter your Gmail address (the one you'll use with this tool)
-   - Click **Add**
-9. Click **Save and Continue**
-10. Review and click **Back to Dashboard**
-
-> **Note**: Your app will stay in "Testing" mode, which is fine for personal use. Only the test users you added can authenticate. If you skip adding test users, authentication will fail.
-
-### Step 4: Create OAuth Credentials
-
-1. Go to **APIs & Services** > **Credentials**
-2. Click **Create Credentials** > **OAuth client ID**
-3. Select **Desktop app** as the application type
-4. Enter a name (e.g., "Gmail Stripper Desktop")
-5. Click **Create**
-6. A dialog appears with your credentials - click **Download JSON**
-7. Save the file as `credentials.json` in your project directory
-
-### Step 5: Authenticate
-
-Run the auth command to complete OAuth setup:
-
-```bash
-gmail-clean auth --credentials credentials.json --email your-email@gmail.com
+```
+backups/
+├── images/      2005-04-09_vacation_photo.jpg
+├── documents/   2006-03-20_report.pdf
+├── audio/       2007-08-30_voicemail.mp3
+├── video/       2011-05-22_clip.mp4
+└── other/       2013-02-14_archive.zip
 ```
 
-This will:
-1. Open your browser to Google's login page
-2. Ask you to sign in and grant permissions
-3. Save an encrypted token locally (`token.enc`)
-
-> **Token Expiry**: Access tokens expire after 1 hour. The tool automatically refreshes them using the refresh token. If you get authentication errors after some time, just run the `auth` command again.
-
-## Usage
-
-### Authenticate
-
-```bash
-gmail-clean auth --credentials credentials.json --email your-email@gmail.com
-```
-
-This opens a browser for Google authentication. The token is encrypted and stored locally.
-
-### Scan for Emails with Attachments
-
-```bash
-# Basic scan
-gmail-clean scan --email your-email@gmail.com
-
-# Filter by size and date
-gmail-clean scan --email your-email@gmail.com --min-size 5MB --before 2020-01-01
-
-# Export results to CSV
-gmail-clean scan --email your-email@gmail.com --export scan_results.csv
-```
-
-### Process Emails (Strip Attachments)
-
-```bash
-# Dry run (preview only - default)
-gmail-clean process --email your-email@gmail.com --min-size 1MB
-
-# Actually process emails
-gmail-clean process --email your-email@gmail.com --min-size 1MB --no-dry-run
-
-# Process with specific date range
-gmail-clean process --email your-email@gmail.com --before 2015-01-01 --min-size 10MB --no-dry-run
-
-# Process and create zip archives for each file type
-gmail-clean process --email your-email@gmail.com --min-size 1MB --no-dry-run --zip
-```
-
-### Check Status
-
-```bash
-gmail-clean status
-```
-
-### Revert Processed Emails
-
-If you need to restore original emails (with attachments) after processing, you can revert them while the originals are still in Gmail Trash (typically 30 days).
-
-```bash
-# List emails that can be reverted
-gmail-clean revert --email your-email@gmail.com --list
-
-# Preview what would be reverted (dry run)
-gmail-clean revert --email your-email@gmail.com
-
-# Revert all revertible emails
-gmail-clean revert --email your-email@gmail.com --no-dry-run
-
-# Revert a specific email by its ID
-gmail-clean revert --email your-email@gmail.com --id 1234567890 --no-dry-run
-```
-
-**How revert works:**
-1. Finds the original email in Gmail Trash using the Message-ID
-2. Copies the original back to All Mail
-3. Restores the original labels
-4. Deletes the stripped version
-5. Updates the manifest status to "reverted"
-
-**Important notes:**
-- Revert only works while originals are in Trash (default 30 days)
-- Once Gmail permanently deletes from Trash, revert is not possible
-- Attachments remain in your local backup even after revert
-
-### Export Manifest
-
-```bash
-gmail-clean export-manifest manifest.json
-gmail-clean export-manifest manifest.csv --format csv
-```
-
-### Cleanup
-
-```bash
-gmail-clean cleanup --older-than-days 30
-```
+Set `organize_by` in your config to `date` (year/month/day/subject), `sender` (by domain and address) or `label` if you prefer a different shape. `manifest.json` records every processed message and the exact path, hash and size of each file extracted from it.
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml` and customize:
+Copy `config.example.yaml` to `config.yaml` and edit. Every value has a CLI equivalent; the config file just saves you retyping them.
 
 ```yaml
 gmail:
-  email: "your-email@gmail.com"
-
-oauth:
-  credentials_file: "credentials.json"
-  token_file: "token.enc"
+  email: "you@gmail.com"
 
 backup:
   directory: "./backups"
-  organize_by: "type"  # type (default), date, sender, or label
+  organize_by: "type"        # type | date | sender | label
 
 processing:
   dry_run: true
   batch_size: 50
-  skip_encrypted: true
+  skip_encrypted: true       # S/MIME and PGP cannot be safely rewritten
   preserve_inline_images: true
-  min_attachment_size: 102400  # 100KB
+  min_attachment_size: 102400
 
 safety:
   keep_trash_days: 30
   require_confirmation: true
 ```
 
-## Backup Structure
+`config.yaml`, `credentials.json`, `token.enc`, `manifest.json`, `backups/` and `logs/` are all gitignored — none of your mail or credentials can be committed by accident.
 
-By default, attachments are organized by file type with date-prefixed filenames for easy browsing and sorting:
+## Google Cloud setup
+
+<details>
+<summary>Creating OAuth credentials (one time, ~5 minutes)</summary>
+
+The tool talks to Gmail over IMAP using OAuth2, so you need a Google Cloud project of your own. Nothing is billed; this stays inside the free tier.
+
+1. **Create a project** — [Google Cloud Console](https://console.cloud.google.com/) → project dropdown → **New Project** → name it → **Create**, then select it.
+
+2. **Enable the Gmail API** — **APIs & Services → Library**, search "Gmail API", **Enable**.
+
+3. **Configure the consent screen** — **APIs & Services → OAuth consent screen**:
+   - User type **External** (unless you're on Google Workspace) → **Create**
+   - Fill in app name, user support email, developer contact
+   - **Scopes** → **Add or Remove Scopes** → filter for `https://mail.google.com/` → check it → **Update**
+   - **Test users** → **Add Users** → add the Gmail address you'll be using
+
+   Leaving the app in "Testing" mode is correct for personal use. If you skip adding yourself as a test user, authentication will fail.
+
+4. **Create credentials** — **APIs & Services → Credentials** → **Create Credentials → OAuth client ID** → application type **Desktop app** → **Create** → **Download JSON**, saved as `credentials.json` in the project directory.
+
+5. **Authenticate**:
+
+   ```bash
+   gmail-clean auth --credentials credentials.json --email you@gmail.com
+   ```
+
+   A browser opens for sign-in; the resulting token is encrypted to `token.enc`. Access tokens expire hourly and are refreshed automatically — if a refresh ever fails, re-run `auth`.
+
+**Why the full `https://mail.google.com/` scope?** Rewriting a message means appending a new one and deleting the old, which the narrower read-only and modify scopes do not permit.
+
+</details>
+
+## Project structure
 
 ```
-backups/
-├── images/
-│   ├── 2005-04-09_vacation_photo.jpg
-│   ├── 2008-06-15_birthday.png
-│   └── 2010-12-25_christmas.heic
-├── documents/
-│   ├── 2006-03-20_report.pdf
-│   ├── 2009-11-10_spreadsheet.xlsx
-│   └── 2012-07-04_presentation.pptx
-├── audio/
-│   └── 2007-08-30_voicemail.mp3
-├── video/
-│   └── 2011-05-22_clip.mp4
-└── other/
-    └── 2013-02-14_archive.zip
-```
-
-**File type categories:**
-- **images**: jpg, jpeg, png, gif, bmp, webp, heic, heif, tiff, svg, raw, cr2, nef, psd
-- **documents**: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, rtf, odt, csv, md, html
-- **audio**: mp3, wav, m4a, flac, ogg, aac, wma, aiff, mid, midi
-- **video**: mp4, mov, avi, mkv, wmv, flv, webm, m4v, mpeg, mpg
-- **other**: everything else
-
-### Alternative Organization Strategies
-
-You can change `organize_by` in your config to use different structures:
-
-- **`type`** (default): Flat folders by file type with date-prefixed filenames
-- **`date`**: Nested year/month/day/subject folders
-- **`sender`**: Organized by sender domain and email
-- **`label`**: Organized by Gmail label
-
-### Creating Zip Archives
-
-Use the `--zip` flag with the process command to create zip archives for each file type category:
-
-```bash
-gmail-clean process --email your-email@gmail.com --no-dry-run --zip
-```
-
-This creates:
-```
-backups/
-├── images.zip
-├── documents.zip
-├── audio.zip
-├── video.zip
-└── other.zip
-```
-
-A manifest file (`manifest.json`) tracks all processed emails and their backup locations.
-
-## Safety Features
-
-- **Dry Run by Default** - Always preview before making changes
-- **Two-Phase Replace** - New email uploaded and verified before original is deleted
-- **Trash Retention** - Originals moved to Trash, not permanently deleted
-- **Revert Command** - Restore originals from Trash within 30 days if needed
-- **Transaction Logging** - Operations logged for recovery from interruptions
-- **Encrypted Emails Skipped** - S/MIME and PGP emails are detected and skipped
-- **Inline Images Preserved** - Only strips actual attachments, not embedded images
-
-## How It Works
-
-1. **Scan**: Query Gmail for emails with attachments matching your criteria
-2. **Extract**: Download attachments to local backup directory
-3. **Reconstruct**: Build new email without attachments, adding placeholder text
-4. **Replace**: Upload reconstructed email, verify, apply labels, delete original
-
-The placeholder in the email body shows:
-```
-[Attachment Removed]
-Filename: document.pdf
-Original Size: 2.5 MB
-Backup Location: backups/documents/2024-01-15_document.pdf
+src/
+├── auth/        OAuth2 flow + PBKDF2/Fernet encrypted token storage
+├── imap/        IMAP client (retry + reconnect), BODYSTRUCTURE scanner, Gmail search
+├── processor/   extractor → backup → reconstructor → validator → replacer,
+│                plus batch orchestration, transaction log, revert
+├── models/      typed dataclasses for headers, attachments, results
+├── utils/       SHA-256 hashing, TinyDB manifest, logging
+└── cli/         Typer commands, Rich output, YAML config
 ```
 
 ## Limitations
 
-- Cannot process encrypted emails (S/MIME, PGP)
-- Requires full Gmail API scope (`https://mail.google.com/`)
-- Processing speed limited by Gmail rate limits (~5-10 seconds per email)
+- **Encrypted mail is skipped.** S/MIME and PGP messages are detected and left alone — rewriting them would break their signatures.
+- **Gmail rate limits set the pace.** Expect roughly 5–10 seconds per message; this is a run-it-overnight tool, not an instant one.
+- **Revert has a deadline.** Once Gmail purges the Trash (about 30 days), the original is gone for good. Your attachment backups are unaffected either way.
+- **The replacement gets a new internal date.** Gmail's own received-timestamp for the rewritten message is the upload time; the `Date:` header — the one that is displayed and sorted on — is preserved.
 
 ## Development
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests
-pytest
-
-# Type checking
-mypy src/
-
-# Linting
-ruff check src/
+pytest                    # test suite
+ruff check src/ tests/    # linting
+mypy src/                 # type checking (strict: no untyped defs)
 ```
 
-## License
+All three run clean on `main`. `mypy` is configured strictly (`disallow_untyped_defs`, `warn_return_any`), so the `imaplib` and `google-auth` boundaries — where the upstream stubs return `Any` — are handled with explicit narrowing and `cast`, not with blanket suppressions.
 
-MIT License - see [LICENSE](LICENSE) file.
+## Safety checklist
+
+Before a large run:
+
+- [ ] Dry run first and read the output — it lists exactly which messages and files are affected
+- [ ] Process a small `--limit` run and confirm the results in Gmail
+- [ ] Verify the backup files exist and open correctly
+- [ ] Leave originals in Trash until you are confident
+
+This tool modifies your mailbox. It is built to fail safe, but the checks above are still yours to run.
 
 ## Contributing
 
-Contributions welcome! Please open an issue to discuss changes before submitting a PR.
+Issues and pull requests are welcome — please open an issue to discuss substantial changes first.
 
-## Disclaimer
+## License
 
-This tool modifies emails in your Gmail account. While it includes safety features, always:
-- Start with dry-run mode
-- Test on a small batch first
-- Verify backups are created correctly
-- Keep originals in Trash until you're confident
+MIT — see [LICENSE](LICENSE).
