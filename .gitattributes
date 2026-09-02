@@ -1,0 +1,26 @@
+# Normalize line endings: store everything as LF in the repository and let Git
+# convert to the platform's convention on checkout. Without this the repo ends up
+# with mixed CRLF/LF blobs depending on which machine committed.
+* text=auto
+
+# Explicit rules for the file types in this project.
+*.py    text diff=python
+*.md    text
+*.toml  text
+*.yaml  text
+*.yml   text
+*.json  text
+*.jsonl text
+*.txt   text
+*.cfg   text
+
+# Binary assets must never be line-ending converted.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.pdf   binary
+*.zip   binary
+*.enc   binary
+*.mp3   binary
+*.mp4   binary
