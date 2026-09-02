@@ -14,39 +14,13 @@ from src.utils.logging import logger
 class EmailReconstructor:
     """Reconstructs emails with attachments stripped.
 
-    Preserves all headers (especially threading-related) and
-    replaces attachment parts with placeholder text.
+    Replaces attachment parts with placeholder text while leaving every header
+    untouched. Headers survive because reconstruction edits the parsed message
+    in place rather than building a new one and copying fields across: nothing
+    here writes to the header block, so Message-ID, References and In-Reply-To
+    cannot drift. ReconstructionValidator re-parses the serialised result and
+    fails the message if any of them did.
     """
-
-    # Headers critical for threading - must be preserved exactly
-    CRITICAL_HEADERS = [
-        "Message-ID",
-        "Date",
-        "From",
-        "To",
-        "Cc",
-        "Bcc",
-        "Subject",
-        "In-Reply-To",
-        "References",
-        "Reply-To",
-        "MIME-Version",
-        "Content-Type",
-    ]
-
-    # Headers to preserve but not critical
-    PRESERVE_HEADERS = [
-        "Received",
-        "Return-Path",
-        "X-Mailer",
-        "User-Agent",
-        "Thread-Index",
-        "Thread-Topic",
-        "X-Priority",
-        "Importance",
-        "X-MS-Has-Attach",
-        "X-MS-TNEF-Correlator",
-    ]
 
     def __init__(
         self,
