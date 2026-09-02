@@ -4,9 +4,12 @@ import imaplib
 import re
 import ssl
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 from src.auth.oauth import GmailOAuth
+
+T = TypeVar("T")
 
 
 class IMAPConnectionError(Exception):
@@ -154,7 +157,8 @@ class GmailIMAPClient:
             self._selected_folder = folder
 
             # Parse message count from response
-            count = int(data[0].decode() if isinstance(data[0], bytes) else data[0])
+            raw_count = data[0]
+            count = int(raw_count.decode() if isinstance(raw_count, bytes) else str(raw_count))
             return count
 
         except imaplib.IMAP4.error as e:
@@ -184,7 +188,7 @@ class GmailIMAPClient:
                 # Format: (\\Flags) "delimiter" "folder_name"
                 if isinstance(item, bytes):
                     item = item.decode("utf-8", errors="replace")
-                match = re.search(r'"[^"]*" "(.*)"$|"[^"]*" (.*)$', item)
+                match = re.search(r'"[^"]*" "(.*)"$|"[^"]*" (.*)$', str(item))
                 if match:
                     folder_name = match.group(1) or match.group(2)
                     folders.append(folder_name.strip('"'))
@@ -284,7 +288,7 @@ class GmailIMAPClient:
             Raw email bytes (RFC822 format).
         """
         result = self.fetch(uid, "(RFC822)")
-        return result.get("RFC822", b"")
+        return cast(bytes, result.get("RFC822", b""))
 
     def fetch_headers(self, uid: int) -> bytes:
         """Fetch only email headers by UID.
@@ -296,7 +300,7 @@ class GmailIMAPClient:
             Raw header bytes.
         """
         result = self.fetch(uid, "(BODY[HEADER])")
-        return result.get("BODY[HEADER]", b"")
+        return cast(bytes, result.get("BODY[HEADER]", b""))
 
     def fetch_bodystructure(self, uid: int) -> Any:
         """Fetch BODYSTRUCTURE for attachment analysis.
@@ -339,7 +343,7 @@ class GmailIMAPClient:
             Raw part content (may be encoded).
         """
         result = self.fetch(uid, f"(BODY[{part_number}])")
-        return result.get(f"BODY[{part_number}]", b"")
+        return cast(bytes, result.get(f"BODY[{part_number}]", b""))
 
     def append(
         self,
@@ -633,8 +637,8 @@ class GmailIMAPClient:
         return any(indicator in error_str for indicator in connection_indicators)
 
     def _retry_with_reconnect(
-        self, operation_name: str, operation_func: Any, *args: Any, **kwargs: Any
-    ) -> Any:
+        self, operation_name: str, operation_func: Callable[..., T], *args: Any, **kwargs: Any
+    ) -> T:
         """Execute an operation with retry logic and automatic reconnection.
 
         Args:
@@ -753,7 +757,7 @@ class GmailIMAPClient:
             labels_str = match.group(1)
             # Parse quoted and unquoted labels
             labels = re.findall(r'"([^"]+)"|(\S+)', labels_str)
-            result["X-GM-LABELS"] = [l[0] or l[1] for l in labels if l[0] or l[1]]
+            result["X-GM-LABELS"] = [m[0] or m[1] for m in labels if m[0] or m[1]]
 
         # Extract BODYSTRUCTURE
         match = re.search(r"BODYSTRUCTURE (\(.*\))", header)

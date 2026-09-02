@@ -2,9 +2,8 @@
 
 from datetime import datetime
 from email import policy
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from email.parser import BytesParser
-from pathlib import Path
 from typing import Any
 
 from src.models.email import AttachmentInfo, SavedAttachment
@@ -137,7 +136,7 @@ Tool: gmail-clean-and-backup
         """
         return self._parser.parsebytes(raw_email)
 
-    def serialize(self, msg: EmailMessage) -> bytes:
+    def serialize(self, msg: MIMEPart) -> bytes:
         """Serialize EmailMessage back to bytes.
 
         Args:
@@ -150,10 +149,10 @@ Tool: gmail-clean-and-backup
 
     def _strip_attachments(
         self,
-        msg: EmailMessage,
+        msg: MIMEPart,
         attachments: list[AttachmentInfo],
         backup_paths: dict[str, str],
-    ) -> EmailMessage:
+    ) -> MIMEPart:
         """Strip specified attachments from message.
 
         Args:
@@ -185,11 +184,11 @@ Tool: gmail-clean-and-backup
 
     def _process_multipart(
         self,
-        msg: EmailMessage,
+        msg: MIMEPart,
         filenames_to_strip: set[str],
         backup_paths: dict[str, str],
         attachments: list[AttachmentInfo],
-    ) -> EmailMessage:
+    ) -> MIMEPart:
         """Process multipart message, stripping attachments.
 
         Args:
@@ -265,7 +264,7 @@ Tool: gmail-clean-and-backup
                 new_payload.append(placeholder_part)
 
         # Replace message payload
-        msg.set_payload(new_payload)
+        msg.set_payload(new_payload)  # type: ignore[arg-type]
 
         # Restore the Content-Type header if it was lost or corrupted
         # Python's email library can lose Content-Type during set_payload()
@@ -329,10 +328,10 @@ class MIMETreeWalker:
 
     @staticmethod
     def walk_and_modify(
-        msg: EmailMessage,
+        msg: MIMEPart,
         modifier: Any,
         depth: int = 0,
-    ) -> EmailMessage:
+    ) -> MIMEPart:
         """Walk MIME tree, applying modifier function to each part.
 
         Args:
@@ -365,7 +364,7 @@ class MIMETreeWalker:
 
         # Update message with modified parts
         if new_parts:
-            msg.set_payload(new_parts)
+            msg.set_payload(new_parts)  # type: ignore[arg-type]
 
         # Restore Content-Type header if lost
         if original_content_type and not msg.get("Content-Type"):
@@ -376,7 +375,7 @@ class MIMETreeWalker:
         return msg
 
     @staticmethod
-    def get_depth(msg: EmailMessage) -> int:
+    def get_depth(msg: MIMEPart) -> int:
         """Get maximum depth of MIME tree.
 
         Args:
@@ -396,7 +395,7 @@ class MIMETreeWalker:
         return 1 + max_child_depth
 
     @staticmethod
-    def count_parts(msg: EmailMessage) -> int:
+    def count_parts(msg: MIMEPart) -> int:
         """Count total parts in MIME tree.
 
         Args:
@@ -415,7 +414,7 @@ class MIMETreeWalker:
         return count
 
     @staticmethod
-    def find_text_parts(msg: EmailMessage) -> list[EmailMessage]:
+    def find_text_parts(msg: MIMEPart) -> list[MIMEPart]:
         """Find all text/plain and text/html parts.
 
         Args:
@@ -487,7 +486,7 @@ class SimpleReconstructor:
 
         return msg.as_bytes(policy=policy.SMTP)
 
-    def _append_to_text_parts(self, msg: EmailMessage, notice: str) -> None:
+    def _append_to_text_parts(self, msg: MIMEPart, notice: str) -> None:
         """Append notice to text parts of message.
 
         Args:

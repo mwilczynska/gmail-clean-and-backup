@@ -1,7 +1,6 @@
 """Backup management for extracted attachments."""
 
 import re
-import shutil
 import unicodedata
 import zipfile
 from datetime import datetime
@@ -10,7 +9,6 @@ from typing import Any
 
 from src.models.email import EmailHeader, SavedAttachment
 from src.utils.hashing import compute_sha256
-
 
 # File type categories for organization
 FILE_TYPE_CATEGORIES: dict[str, set[str]] = {
@@ -507,7 +505,7 @@ class BackupManager:
             counter += 1
             if counter > 1000:
                 # Safety limit
-                raise IOError(f"Too many duplicate files: {path}")
+                raise OSError(f"Too many duplicate files: {path}")
 
 
 class BackupOrganizer:

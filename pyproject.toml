@@ -76,12 +76,22 @@ ignore = [
     "E501",   # line too long (handled by formatter)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Typer declares CLI options as function-call defaults; this is the framework's
+# intended idiom, not the mutable-default hazard B008 exists to catch.
+"src/cli/commands.py" = ["B008"]
+
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+# google-auth-oauthlib ships no type stubs or py.typed marker.
+module = ["google_auth_oauthlib.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

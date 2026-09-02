@@ -1,7 +1,8 @@
 """Batch processing for email attachment stripping."""
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from src.models.email import BatchResult, EmailScanResult
 from src.processor.backup import BackupManager
@@ -12,6 +13,8 @@ from src.utils.logging import OperationLogger, logger
 from src.utils.manifest import ManifestManager
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from src.imap.client import GmailIMAPClient
 
 
@@ -146,7 +149,7 @@ class BatchProcessor:
         total_steps = len(scan_results) * 4
         current_step = 0
 
-        for i, scan_result in enumerate(scan_results):
+        for scan_result in scan_results:
             email_id = str(scan_result.gmail_metadata.gmail_message_id)
             uid = scan_result.header.uid
             subject = scan_result.header.subject[:30]
@@ -397,7 +400,7 @@ class BatchPreview:
 class CheckpointManager:
     """Manage processing checkpoints for resume capability."""
 
-    def __init__(self, checkpoint_path: "Path") -> None:  # type: ignore
+    def __init__(self, checkpoint_path: "Path") -> None:
         """Initialize checkpoint manager.
 
         Args:
@@ -443,8 +446,8 @@ class CheckpointManager:
             return None
 
         try:
-            with open(self.checkpoint_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(self.checkpoint_path, encoding="utf-8") as f:
+                return cast(dict[str, Any], json.load(f))
         except Exception:
             return None
 

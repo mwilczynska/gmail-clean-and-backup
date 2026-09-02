@@ -2,9 +2,13 @@
 
 from email import policy
 from email.parser import BytesParser
+from typing import TYPE_CHECKING
 
 from src.models.email import ValidationResult
 from src.processor.mime_handler import MIMEHandler
+
+if TYPE_CHECKING:
+    from email.message import EmailMessage, MIMEPart
 
 
 class ReconstructionValidator:
@@ -81,8 +85,8 @@ class ReconstructionValidator:
 
     def _check_headers_preserved(
         self,
-        original: "EmailMessage",  # type: ignore
-        reconstructed: "EmailMessage",  # type: ignore
+        original: "EmailMessage",
+        reconstructed: "EmailMessage",
     ) -> list[str]:
         """Verify critical headers are preserved.
 
@@ -117,7 +121,7 @@ class ReconstructionValidator:
 
     def _check_mime_validity(
         self,
-        msg: "EmailMessage",  # type: ignore
+        msg: "MIMEPart",
     ) -> list[str]:
         """Verify MIME structure is valid.
 
@@ -154,8 +158,8 @@ class ReconstructionValidator:
 
     def _check_body_preserved(
         self,
-        original: "EmailMessage",  # type: ignore
-        reconstructed: "EmailMessage",  # type: ignore
+        original: "EmailMessage",
+        reconstructed: "EmailMessage",
     ) -> bool:
         """Verify text body is preserved.
 
@@ -166,7 +170,6 @@ class ReconstructionValidator:
         Returns:
             True if body appears preserved.
         """
-        from src.processor.mime_handler import EncodingHandler
 
         # Find text parts in both messages
         original_text = self._extract_text_content(original)
@@ -185,7 +188,7 @@ class ReconstructionValidator:
 
     def _extract_text_content(
         self,
-        msg: "EmailMessage",  # type: ignore
+        msg: "MIMEPart",
     ) -> str:
         """Extract all text content from message.
 

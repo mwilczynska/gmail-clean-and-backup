@@ -1,6 +1,5 @@
 """Tests for manifest management."""
 
-import pytest
 from datetime import datetime
 from pathlib import Path
 

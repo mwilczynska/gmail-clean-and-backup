@@ -1,9 +1,10 @@
 """Pytest configuration and shared fixtures."""
 
-import pytest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.models.email import (
     AttachmentInfo,

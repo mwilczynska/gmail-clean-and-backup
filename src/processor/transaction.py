@@ -65,7 +65,7 @@ class TransactionManager:
             step: Step name (extracted, reconstructed, uploaded, verified, labeled, deleted).
             data: Additional data for this step.
         """
-        entry = {
+        entry: dict[str, Any] = {
             "txn_id": txn_id,
             "status": step,
             "timestamp": datetime.now().isoformat(),
@@ -149,7 +149,7 @@ class TransactionManager:
             List of incomplete transaction IDs.
         """
         # Read all transactions and find those without completed/failed status
-        all_txns: dict[str, str] = {}
+        all_txns: dict[str, Any] = {}
 
         for entry in self._log.read_all():
             txn_id = entry.get("txn_id")
@@ -302,12 +302,12 @@ class TransactionLog:
         Returns:
             List of entries for this transaction.
         """
-        entries = []
+        entries: list[dict[str, Any]] = []
 
         if not self.path.exists():
             return entries
 
-        with open(self.path, "r", encoding="utf-8") as f:
+        with open(self.path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -327,12 +327,12 @@ class TransactionLog:
         Returns:
             List of all entries.
         """
-        entries = []
+        entries: list[dict[str, Any]] = []
 
         if not self.path.exists():
             return entries
 
-        with open(self.path, "r", encoding="utf-8") as f:
+        with open(self.path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

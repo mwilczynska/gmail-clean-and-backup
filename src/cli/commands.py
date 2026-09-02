@@ -1,8 +1,6 @@
 """CLI commands using Typer."""
 
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -19,7 +17,7 @@ console = Console()
 output = RichOutput(console)
 
 
-def get_config(config_path: Optional[Path]) -> Config:
+def get_config(config_path: Path | None) -> Config:
     """Load and validate configuration.
 
     Args:
@@ -89,7 +87,7 @@ def auth(
 
     except AuthenticationError as e:
         output.print_error("Authentication failed", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -106,24 +104,24 @@ def scan(
         "-s",
         help="Minimum attachment size (e.g., 100KB, 1MB, 5M)",
     ),
-    before: Optional[str] = typer.Option(
+    before: str | None = typer.Option(
         None,
         "--before",
         "-b",
         help="Emails before date (YYYY-MM-DD or relative: 30d, 6m, 1y)",
     ),
-    after: Optional[str] = typer.Option(
+    after: str | None = typer.Option(
         None,
         "--after",
         "-a",
         help="Emails after date (YYYY-MM-DD or relative)",
     ),
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         None,
         "--config",
         help="Path to config file",
     ),
-    export: Optional[Path] = typer.Option(
+    export: Path | None = typer.Option(
         None,
         "--export",
         help="Export results to CSV file",
@@ -151,7 +149,7 @@ def scan(
         min_size_bytes = parse_size_string(min_size)
     except ValueError as e:
         output.print_error(f"Invalid size format: {min_size}", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Parse dates
     before_date = None
@@ -162,14 +160,14 @@ def scan(
             before_date = parse_date_string(before)
         except ValueError as e:
             output.print_error(f"Invalid date format: {before}", str(e))
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     if after:
         try:
             after_date = parse_date_string(after)
         except ValueError as e:
             output.print_error(f"Invalid date format: {after}", str(e))
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     output.console.print(f"Scanning [cyan]{email}[/cyan]...")
     output.console.print(f"  Min size: {min_size}")
@@ -239,7 +237,7 @@ def scan(
 
     except Exception as e:
         output.print_error("Scan failed", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -267,12 +265,12 @@ def process(
         "-s",
         help="Minimum attachment size",
     ),
-    before: Optional[str] = typer.Option(
+    before: str | None = typer.Option(
         None,
         "--before",
         help="Process emails before date",
     ),
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         None,
         "--config",
         help="Path to config file",
@@ -313,7 +311,7 @@ def process(
         min_size_bytes = parse_size_string(min_size)
     except ValueError as e:
         output.print_error(f"Invalid size: {min_size}", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     before_date = None
     if before:
@@ -321,7 +319,7 @@ def process(
             before_date = parse_date_string(before)
         except ValueError as e:
             output.print_error(f"Invalid date: {before}", str(e))
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     mode = "[yellow]DRY RUN[/yellow]" if dry_run else "[red]LIVE MODE[/red]"
     output.console.print(f"\nProcessing mode: {mode}")
@@ -429,7 +427,7 @@ def process(
 
                     if created_zips:
                         output.console.print("\n[bold green]Zip archives created:[/bold green]")
-                        for category, zip_path in created_zips.items():
+                        for zip_path in created_zips.values():
                             zip_size = zip_path.stat().st_size
                             size_str = f"{zip_size / (1024*1024):.1f} MB" if zip_size > 1024*1024 else f"{zip_size / 1024:.1f} KB"
                             output.console.print(f"  {zip_path} ({size_str})")
@@ -442,12 +440,12 @@ def process(
         raise  # Re-raise typer.Exit to avoid catching it as an error
     except Exception as e:
         output.print_error("Processing failed", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
 def status(
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         None,
         "--config",
         help="Path to config file",
@@ -547,7 +545,7 @@ def revert(
         "-e",
         help="Gmail address",
     ),
-    email_id: Optional[str] = typer.Option(
+    email_id: str | None = typer.Option(
         None,
         "--id",
         help="Specific email ID to revert (from manifest)",
@@ -557,7 +555,7 @@ def revert(
         "--dry-run/--no-dry-run",
         help="Preview what would be reverted without making changes",
     ),
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         None,
         "--config",
         help="Path to config file",
@@ -623,7 +621,7 @@ def revert(
                 f"     Subject: {entry.subject[:60]}{'...' if len(entry.subject) > 60 else ''}\n"
             )
         output.console.print(
-            f"\n[dim]Use --id <email_id> to revert a specific email[/dim]"
+            "\n[dim]Use --id <email_id> to revert a specific email[/dim]"
         )
         raise typer.Exit(0)
 
@@ -709,7 +707,7 @@ def revert(
                     progress.update(task, advance=1)
 
             output.console.print()
-            output.console.print(f"[bold]Revert Complete[/bold]")
+            output.console.print("[bold]Revert Complete[/bold]")
             output.console.print(f"  Successful: [green]{successful}[/green]")
             output.console.print(f"  Failed: [red]{failed}[/red]")
 
@@ -717,7 +715,7 @@ def revert(
         raise  # Re-raise typer.Exit to avoid catching it as an error
     except Exception as e:
         output.print_error("Revert failed", str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _export_scan_results(results: list, path: Path) -> None:

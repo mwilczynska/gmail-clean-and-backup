@@ -1,6 +1,5 @@
 """Safe email replacement with two-phase commit."""
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from src.models.email import (
@@ -8,16 +7,15 @@ from src.models.email import (
     ExtractionResult,
     GmailMetadata,
     ReplaceResult,
-    SavedAttachment,
 )
 from src.processor.reconstructor import EmailReconstructor
 from src.processor.transaction import TransactionManager
 from src.processor.validator import ReconstructionValidator
-from src.utils.hashing import compute_sha256
 from src.utils.logging import logger
 
 if TYPE_CHECKING:
     from src.imap.client import GmailIMAPClient
+    from src.processor.backup import BackupManager
 
 
 class EmailReplacer:
@@ -214,12 +212,9 @@ class EmailReplacer:
             # Fetch uploaded message
             uploaded_data = self.client.fetch_raw_email(new_uid)
 
-            # Compare hashes
-            # Note: Headers may be modified by server, so compare body content
-            expected_hash = compute_sha256(expected_data)
-            uploaded_hash = compute_sha256(uploaded_data)
-
-            # For now, accept if sizes are similar (server may modify headers)
+            # Gmail rewrites some headers on APPEND, so the uploaded bytes are not
+            # byte-identical to what we sent and a hash comparison would always fail.
+            # Verify by size instead, allowing for that header rewriting.
             size_diff = abs(len(uploaded_data) - len(expected_data))
             if size_diff < 1000:  # Allow up to 1KB difference for header changes
                 return True
@@ -311,7 +306,7 @@ class SafeReplacer:
         original_uid: int,
         scan_result: EmailScanResult,
         extraction_result: ExtractionResult,
-        backup_manager: "BackupManager",  # type: ignore
+        backup_manager: "BackupManager",
     ) -> ReplaceResult:
         """Replace with additional backup verification.
 

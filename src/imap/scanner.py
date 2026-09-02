@@ -1,6 +1,5 @@
 """Email scanner for attachment detection without full download."""
 
-import re
 from datetime import datetime
 from email import policy
 from email.header import decode_header
@@ -472,7 +471,7 @@ class EmailScanner:
 
         # Extract size (usually at index 6 for single parts)
         size = 0
-        for i, token in enumerate(tokens):
+        for token in tokens:
             if isinstance(token, str) and token.isdigit():
                 size = int(token)
                 break

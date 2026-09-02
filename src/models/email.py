@@ -40,7 +40,7 @@ class GmailMetadata:
     def has_label(self, label: str) -> bool:
         """Check if message has a specific label (case-insensitive)."""
         label_lower = label.lower()
-        return any(l.lower() == label_lower for l in self.labels)
+        return any(existing.lower() == label_lower for existing in self.labels)
 
 
 @dataclass

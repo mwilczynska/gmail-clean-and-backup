@@ -1,8 +1,7 @@
 """OAuth2 authentication handler for Gmail IMAP access."""
 
-import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -189,7 +188,7 @@ class GmailOAuth:
             )
 
             self._save_credentials(creds)
-            return creds
+            return cast(Credentials, creds)
 
         except Exception as e:
             raise AuthenticationError(f"OAuth flow failed: {e}") from e

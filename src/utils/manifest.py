@@ -236,7 +236,7 @@ class ManifestManager:
         """
         all_entries = self._emails.all()
 
-        stats = {
+        stats: dict[str, Any] = {
             "total": len(all_entries),
             "by_status": {},
             "total_original_size": 0,

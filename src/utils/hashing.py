@@ -71,7 +71,7 @@ def verify_file_hash(path: Path, expected_hash: str, chunk_size: int = 8192) -> 
     try:
         computed = compute_file_hash(path, chunk_size)
         return computed == expected_hash
-    except (FileNotFoundError, IOError):
+    except (OSError, FileNotFoundError):
         return False
 
 

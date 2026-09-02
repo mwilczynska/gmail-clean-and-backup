@@ -14,6 +14,8 @@ from src.processor.backup import BackupManager
 from src.utils.logging import logger
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from src.imap.client import GmailIMAPClient
 
 
@@ -253,7 +255,6 @@ class StreamingExtractor:
             SavedAttachment if successful.
         """
         import hashlib
-        import tempfile
 
         # Get backup path
         backup_path = self.backup_manager.get_backup_path(
@@ -305,7 +306,7 @@ class StreamingExtractor:
     def _decode_base64_streaming(
         self,
         raw_data: bytes,
-        output_path: "Path",  # type: ignore
+        output_path: "Path",
         attachment: AttachmentInfo,
     ) -> SavedAttachment:
         """Decode base64 data in chunks to file.
@@ -319,7 +320,6 @@ class StreamingExtractor:
             SavedAttachment record.
         """
         import hashlib
-        from pathlib import Path
 
         hash_obj = hashlib.sha256()
         total_size = 0

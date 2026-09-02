@@ -4,7 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -111,7 +111,7 @@ class SecureTokenStorage:
             fernet = Fernet(key)
             decrypted = fernet.decrypt(encrypted)
 
-            return json.loads(decrypted.decode())
+            return cast(dict[str, Any], json.loads(decrypted.decode()))
 
         except Exception:
             # Decryption failed - token may be corrupted or password changed

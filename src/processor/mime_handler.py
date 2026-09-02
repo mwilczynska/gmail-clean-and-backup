@@ -1,8 +1,7 @@
 """Low-level MIME manipulation utilities."""
 
-from email import policy
-from email.header import decode_header, make_header
-from email.message import EmailMessage
+from email.header import decode_header
+from email.message import MIMEPart
 from urllib.parse import unquote
 
 
@@ -14,7 +13,7 @@ class MIMEHandler:
     """
 
     @staticmethod
-    def is_attachment(part: EmailMessage) -> bool:
+    def is_attachment(part: MIMEPart) -> bool:
         """Check if part is an attachment (vs inline).
 
         Args:
@@ -27,7 +26,7 @@ class MIMEHandler:
         return disposition == "attachment"
 
     @staticmethod
-    def is_inline(part: EmailMessage) -> bool:
+    def is_inline(part: MIMEPart) -> bool:
         """Check if part is inline.
 
         Args:
@@ -40,7 +39,7 @@ class MIMEHandler:
         return disposition == "inline"
 
     @staticmethod
-    def is_inline_image(part: EmailMessage) -> bool:
+    def is_inline_image(part: MIMEPart) -> bool:
         """Check if part is an inline image.
 
         These are typically referenced in HTML via cid: URLs
@@ -57,7 +56,7 @@ class MIMEHandler:
         return disposition == "inline" and content_type.startswith("image/")
 
     @staticmethod
-    def has_content_id(part: EmailMessage) -> bool:
+    def has_content_id(part: MIMEPart) -> bool:
         """Check if part has a Content-ID header.
 
         Parts with Content-ID are typically referenced in HTML
@@ -72,7 +71,7 @@ class MIMEHandler:
         return part.get("Content-ID") is not None
 
     @staticmethod
-    def get_content_id(part: EmailMessage) -> str | None:
+    def get_content_id(part: MIMEPart) -> str | None:
         """Get Content-ID header value.
 
         Args:
@@ -83,11 +82,11 @@ class MIMEHandler:
         """
         cid = part.get("Content-ID")
         if cid:
-            return cid.strip("<>")
+            return str(cid).strip("<>")
         return None
 
     @staticmethod
-    def get_part_filename(part: EmailMessage) -> str | None:
+    def get_part_filename(part: MIMEPart) -> str | None:
         """Extract filename from part, handling RFC 2047/2231 encoding.
 
         Args:
@@ -151,7 +150,7 @@ class MIMEHandler:
         return filename
 
     @staticmethod
-    def get_part_size(part: EmailMessage) -> int:
+    def get_part_size(part: MIMEPart) -> int:
         """Get approximate size of part content.
 
         Args:
@@ -168,7 +167,7 @@ class MIMEHandler:
         return 0
 
     @staticmethod
-    def is_multipart(msg: EmailMessage) -> bool:
+    def is_multipart(msg: MIMEPart) -> bool:
         """Check if message is multipart.
 
         Args:
@@ -180,7 +179,7 @@ class MIMEHandler:
         return msg.is_multipart()
 
     @staticmethod
-    def get_subtype(msg: EmailMessage) -> str:
+    def get_subtype(msg: MIMEPart) -> str:
         """Get MIME subtype (e.g., 'mixed', 'alternative').
 
         Args:
@@ -195,7 +194,7 @@ class MIMEHandler:
         return ""
 
     @staticmethod
-    def is_text_part(part: EmailMessage) -> bool:
+    def is_text_part(part: MIMEPart) -> bool:
         """Check if part is text (plain or HTML).
 
         Args:
@@ -208,7 +207,7 @@ class MIMEHandler:
         return content_type in ("text/plain", "text/html")
 
     @staticmethod
-    def is_encrypted(msg: EmailMessage) -> bool:
+    def is_encrypted(msg: MIMEPart) -> bool:
         """Check if message is encrypted (S/MIME or PGP).
 
         Args:
@@ -280,7 +279,7 @@ class EncodingHandler:
             return str(Header(value, "utf-8"))
 
     @staticmethod
-    def safe_decode_payload(part: EmailMessage) -> str:
+    def safe_decode_payload(part: MIMEPart) -> str:
         """Safely decode part payload with fallbacks.
 
         Args:
@@ -296,6 +295,10 @@ class EncodingHandler:
 
         if isinstance(payload, str):
             return payload
+
+        if not isinstance(payload, bytes):
+            # Nested message payloads are not decodable text
+            return ""
 
         # Try charset from Content-Type
         charset = part.get_content_charset()
@@ -317,7 +320,7 @@ class EncodingHandler:
         return payload.decode("utf-8", errors="replace")
 
     @staticmethod
-    def get_safe_charset(part: EmailMessage) -> str:
+    def get_safe_charset(part: MIMEPart) -> str:
         """Get charset from part or default to utf-8.
 
         Args:
