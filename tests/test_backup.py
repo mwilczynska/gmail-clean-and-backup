@@ -1,6 +1,5 @@
 """Tests for backup management."""
 
-import pytest
 from datetime import datetime
 from pathlib import Path
 
@@ -41,16 +40,27 @@ class TestBackupManager:
         # Test various problematic characters
         assert manager._sanitize_filename("normal.pdf") == "normal.pdf"
         assert manager._sanitize_filename("file:with:colons.pdf") == "file_with_colons.pdf"
-        assert manager._sanitize_filename("file<>with.pdf") == "file__with.pdf"
         assert manager._sanitize_filename("") == "attachment"
+
+        # Runs of invalid characters and whitespace collapse to a single underscore
+        assert manager._sanitize_filename("file<>with.pdf") == "file_with.pdf"
+        assert manager._sanitize_filename("spaced  out   name.pdf") == "spaced_out_name.pdf"
+
+        # Leading/trailing underscores and dots are stripped
+        assert manager._sanitize_filename("__leading.pdf") == "leading.pdf"
 
     def test_sanitize_for_path(self, temp_backup_dir: Path):
         """Test path component sanitization."""
         manager = BackupManager(temp_backup_dir)
 
         assert manager._sanitize_for_path("Normal Subject") == "Normal_Subject"
-        assert manager._sanitize_for_path("Subject: with colons") == "Subject__with_colons"
         assert manager._sanitize_for_path("") == "unknown"
+
+        # ":" becomes "_", then the run of "_ " collapses to a single underscore
+        assert manager._sanitize_for_path("Subject: with colons") == "Subject_with_colons"
+
+        # Long values are truncated without leaving a trailing separator
+        assert manager._sanitize_for_path("A" * 80, max_length=10) == "A" * 10
 
     def test_save_attachment(self, temp_backup_dir: Path):
         """Test attachment saving."""
