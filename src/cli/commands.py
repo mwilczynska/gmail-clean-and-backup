@@ -257,7 +257,13 @@ def process(
         50,
         "--batch-size",
         "-b",
-        help="Number of emails per batch",
+        help="Maximum emails processed in one run",
+    ),
+    limit: int = typer.Option(
+        0,
+        "--limit",
+        "-l",
+        help="Further cap emails processed this run, e.g. --limit 5 for a trial (0 = use --batch-size)",
     ),
     min_size: str = typer.Option(
         "100KB",
@@ -356,12 +362,30 @@ def process(
                 output.console.print("[yellow]No matching emails found.[/yellow]")
                 raise typer.Exit(0)
 
+            # Determine how many of the matches this run will touch
+            max_emails = batch_size
+            if limit > 0:
+                if limit > batch_size:
+                    output.print_warning(
+                        f"--limit {limit} exceeds --batch-size {batch_size}; "
+                        f"processing {batch_size} emails. Raise --batch-size to process more."
+                    )
+                else:
+                    max_emails = limit
+
+            selected = uids[:max_emails]
+            if len(selected) < len(uids):
+                output.console.print(
+                    f"Found {len(uids)} matching emails; this run will process {len(selected)}. "
+                    "Re-run to continue with the rest."
+                )
+
             # Scan
             scanner = EmailScanner(client)
-            output.console.print(f"Scanning {len(uids)} emails...")
+            output.console.print(f"Scanning {len(selected)} emails...")
 
             results = []
-            for uid in uids[:batch_size]:
+            for uid in selected:
                 results.append(scanner.scan_email(uid))
 
             # Preview
